@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, googleLoginUser } from '../api/authapi'
-import { GoogleLogin } from '@react-oauth/google'
+import { loginUser } from '../api/authapi'
 import { saveToken } from '../api/authapi'
 
 function Login() {
@@ -35,14 +34,8 @@ function Login() {
     }
   }
 
-  const handleGoogleSuccess = async (response: any) => {
-    try {
-      const res = await googleLoginUser(response.credential)
-      saveToken(res.data.token)
-      navigate('/dashboard')
-    } catch {
-      alert("Google Login Failed")
-    }
+  const handleGoogleRedirect = () => {
+    window.location.href = `${import.meta.env.VITE_API_URL}/auth/login`
   }
 
   return (
@@ -58,10 +51,7 @@ function Login() {
 
       <br /><br />
 
-      <GoogleLogin
-        onSuccess={handleGoogleSuccess}
-        onError={() => alert("Google Auth Failed")}
-      />
+      <button onClick={handleGoogleRedirect}>Login with Google</button>
 
       <p>Don't have account? <Link to="/register">Register</Link></p>
     </div>
