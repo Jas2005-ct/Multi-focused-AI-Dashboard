@@ -7,8 +7,9 @@ class User(db.Model):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
-    google_id = db.Column(db.String(255), unique=True, nullable=False)
+    google_id = db.Column(db.String(255), unique=True, nullable=True)
     email = db.Column(db.String(255), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=True)
     name = db.Column(db.String(255))
     picture = db.Column(db.String(500))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
