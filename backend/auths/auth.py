@@ -25,23 +25,37 @@ def google_callback():
     token = client.authorize_access_token()
     user_info = token.get('userinfo')
     
-    # Check if user exists, create if not
+    # Check if user exists by google_id
     user = User.query.filter_by(google_id=user_info['sub']).first()
+    
     if not user:
-        user = User(
-            google_id=user_info['sub'],
-            email=user_info['email'],
-            name=user_info.get('name'),
-            picture=user_info.get('picture')
-        )
-        db.session.add(user)
-        db.session.commit()
+        # Check if user exists by email (link accounts)
+        user = User.query.filter_by(email=user_info['email']).first()
+        if user:
+            # Link Google account to existing user
+            user.google_id = user_info['sub']
+            user.picture = user_info.get('picture') or user.picture
+            db.session.commit()
+        else:
+            # Create new user
+            user = User(
+                google_id=user_info['sub'],
+                email=user_info['email'],
+                name=user_info.get('name'),
+                picture=user_info.get('picture')
+            )
+            db.session.add(user)
+            db.session.commit()
     
-    # Store in session
-    session['user_id'] = user.id
-    session['email'] = user.email
+    # Generate JWT token (same as email login)
+    jwt_token = jwt.encode({
+        'user_id': user.id,
+        'email': user.email,
+        'exp': datetime.utcnow() + timedelta(hours=24)
+    }, current_app.secret_key, algorithm='HS256')
     
-    return redirect(url_for('services.hello'))
+    # Redirect to frontend dashboard with token
+    return redirect(f"http://localhost:5173/dashboard?token={jwt_token}")
 
 
 @auth_bp.route('/login', methods=['POST'])
