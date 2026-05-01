@@ -6,6 +6,7 @@ from flask import session, redirect, url_for, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
+from auths.schemas import ValidateErrorSchema, UserSchema, ValidateSuccessSchema
 auth_bp = Blueprint('auth', __name__)
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", None)
@@ -65,12 +66,18 @@ def email_login():
     password = data.get('password')
     
     if not email or not password:
-        return jsonify({'error': 'Email and password required'}), 400
+        return jsonify(ValidateErrorSchema(
+            error="Missing Fields",
+            message="Please provide both email and password"
+        ).model_dump()), 400
     
     user = User.query.filter_by(email=email).first()
     
     if not user or not user.password or not check_password_hash(user.password, password):
-        return jsonify({'error': 'Invalid credentials'}), 401
+        return jsonify(ValidateErrorSchema(
+            error="Invalid Credentials",
+            message="The email or password you entered is incorrect"
+        ).model_dump()), 401
     
     token = jwt.encode({
         'user_id': user.id,
@@ -78,7 +85,10 @@ def email_login():
         'exp': datetime.utcnow() + timedelta(hours=24)
     }, current_app.secret_key, algorithm='HS256')
     
-    return jsonify({'token': token, 'user': {'id': user.id, 'email': user.email, 'name': user.name}})
+    return jsonify(ValidateSuccessSchema(
+        token=token,
+        user=UserSchema(id=user.id, email=user.email, name=user.name)
+    ).model_dump()), 200
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -89,28 +99,46 @@ def register():
     name = data.get('name', '')
     
     if not email or not password:
-        return jsonify({'error': 'Email and password required'}), 400
+        return jsonify(ValidateErrorSchema(
+            error="Missing Fields",
+            message="Please provide both email and password"
+        ).model_dump()), 400
     
-    if User.query.filter_by(email=email).first():
-        if User.query.filter_by(email=email).first().google_id:
-            return jsonify({
-                'error': 'Email already exists',
-                'message': 'Please login with Google'
-            }), 400
+    if len(password) < 6:
+        return jsonify(ValidateErrorSchema(
+            error="Weak Password",
+            message="Password must be at least 6 characters"
+        ).model_dump()), 400
+    
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        if existing_user.google_id:
+            return jsonify(ValidateErrorSchema(
+                error="Email already exists",
+                message="This email is linked to a Google account. Please sign in with Google."
+            ).model_dump()), 409
+        
+        return jsonify(ValidateErrorSchema(
+            error="Email already exists",
+            message="An account with this email already exists. Please login instead."
+        ).model_dump()), 409
     
     hashed_password = generate_password_hash(password)
-    user = User(
+    new_user = User(
         email=email,
         password=hashed_password,
         name=name
     )
-    db.session.add(user)
+    db.session.add(new_user)
     db.session.commit()
     
     token = jwt.encode({
-        'user_id': user.id,
-        'email': user.email,
+        'user_id': new_user.id,
+        'email': new_user.email,
         'exp': datetime.utcnow() + timedelta(hours=24)
     }, current_app.secret_key, algorithm='HS256')
     
-    return jsonify({'token': token, 'user': {'id': user.id, 'email': user.email, 'name': user.name}}), 201
+    return jsonify(ValidateSuccessSchema(
+        token=token,
+        user=UserSchema(id=new_user.id, email=new_user.email, name=new_user.name)
+    ).model_dump()), 201
