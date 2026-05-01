@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { registerUser, saveToken } from '../api/authapi'
+import ErrorModal from '../components/ErrorModal'
 
 function Register() {
   const navigate = useNavigate()
@@ -13,25 +14,25 @@ function Register() {
   })
 
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<{title: string, message: string} | null>(null)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
-    setError('')
+    setError(null)
   }
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name || !form.email || !form.password) {
-      setError('Please fill in all fields')
+      setError({ title: 'Missing Fields', message: 'Please fill in all fields' })
       return
     }
     if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match')
+      setError({ title: 'Password Error', message: 'Passwords do not match' })
       return
     }
     if (form.password.length < 6) {
-      setError('Password must be at least 6 characters')
+      setError({ title: 'Password Error', message: 'Password must be at least 6 characters' })
       return
     }
     try {
@@ -40,7 +41,12 @@ function Register() {
       saveToken(res.data.token)
       navigate('/dashboard')
     } catch (err: any) {
-      setError(err?.response?.data?.error || "Registration Failed")
+      const errorMsg = err?.response?.data?.error || "Registration Failed"
+      const errorDetail = err?.response?.data?.message || ""
+      setError({ 
+        title: 'Registration Error', 
+        message: errorDetail ? `${errorMsg}. ${errorDetail}` : errorMsg 
+      })
     } finally {
       setLoading(false)
     }
@@ -60,8 +66,6 @@ function Register() {
         </div>
 
         <form onSubmit={handleRegister} style={styles.form}>
-          {error && <div style={styles.error}>{error}</div>}
-
           <div style={styles.inputGroup}>
             <label style={styles.label}>Full Name</label>
             <input
@@ -138,6 +142,13 @@ function Register() {
           Already have an account? <Link to="/" style={styles.link}>Sign in</Link>
         </p>
       </div>
+
+      <ErrorModal
+        isOpen={!!error}
+        title={error?.title || ''}
+        message={error?.message || ''}
+        onClose={() => setError(null)}
+      />
     </div>
   )
 }

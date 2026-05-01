@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { loginUser, saveToken } from '../api/authapi'
+import ErrorModal from '../components/ErrorModal'
 
 function Login() {
   const navigate = useNavigate()
@@ -11,17 +12,17 @@ function Login() {
   })
 
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<{title: string, message: string} | null>(null)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
-    setError('')
+    setError(null)
   }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.email || !form.password) {
-      setError('Please fill in all fields')
+      setError({ title: 'Missing Fields', message: 'Please fill in all fields' })
       return
     }
     try {
@@ -30,7 +31,12 @@ function Login() {
       saveToken(res.data.token)
       navigate('/dashboard')
     } catch (err: any) {
-      setError(err?.response?.data?.error || "Login Failed")
+      const errorMsg = err?.response?.data?.error || "Login Failed"
+      const errorDetail = err?.response?.data?.message || ""
+      setError({ 
+        title: 'Login Error', 
+        message: errorDetail ? `${errorMsg}. ${errorDetail}` : errorMsg 
+      })
     } finally {
       setLoading(false)
     }
@@ -50,8 +56,6 @@ function Login() {
         </div>
 
         <form onSubmit={handleLogin} style={styles.form}>
-          {error && <div style={styles.error}>{error}</div>}
-
           <div style={styles.inputGroup}>
             <label style={styles.label}>Email</label>
             <input
@@ -104,6 +108,13 @@ function Login() {
           Don't have an account? <Link to="/register" style={styles.link}>Create one</Link>
         </p>
       </div>
+
+      <ErrorModal
+        isOpen={!!error}
+        title={error?.title || ''}
+        message={error?.message || ''}
+        onClose={() => setError(null)}
+      />
     </div>
   )
 }
