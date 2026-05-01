@@ -6,6 +6,7 @@ const API = axios.create({
 
 export const loginUser = (data: any) => API.post('/auth/login', data)
 
+export const registerUser = (data: any) => API.post('/auth/register', data)
 
 export const googleLoginUser = (token: string) =>
   API.post('/auth/login', { token })
