@@ -31,21 +31,19 @@ def create_app() -> OpenAPI:
     # Initialize OAuth
     oauth.init_app(app)
 
-    # Initialize Google OAuth
+    # Initialize Google OAuth (optional)
     google_client_id = os.getenv("GOOGLE_CLIENT_ID")
     google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-    if not google_client_id or not google_client_secret:
-        raise RuntimeError("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET environment variables")
-
-    oauth.register(
-        name='google',
-        client_id=google_client_id,
-        client_secret=google_client_secret,
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={
-            'scope': 'openid email profile'
-        }
-    )
+    if google_client_id and google_client_secret:
+        oauth.register(
+            name='google',
+            client_id=google_client_id,
+            client_secret=google_client_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={
+                'scope': 'openid email profile'
+            }
+        )
     
     app.oauth = oauth
     app.register_blueprint(auth_bp, url_prefix='/auth')
