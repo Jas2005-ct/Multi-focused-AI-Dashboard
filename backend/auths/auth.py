@@ -78,7 +78,11 @@ def register():
         return jsonify({'error': 'Email and password required'}), 400
     
     if User.query.filter_by(email=email).first():
-        return jsonify({'error': 'Email already exists'}), 400
+        if User.query.filter_by(email=email).first().google_id:
+            return jsonify({
+                'error': 'Email already exists',
+                'message': 'Please login with Google'
+            }), 400
     
     hashed_password = generate_password_hash(password)
     user = User(
