@@ -16,7 +16,8 @@ db_tags = Tag(name='Database Connection', description='Database Connection opera
 @api.get('/')
 @require_auth
 def hello():
-    return "Hello, World!"
+    user = session.get('email')
+    return f"Hello, {user}!"
 
 
 @api.post('/sql-query/', 
