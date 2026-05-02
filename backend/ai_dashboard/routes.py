@@ -6,6 +6,7 @@ from ai_dashboard.schemas import DBConnectionRequest
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag
 from flask import session
+import json
 
 api = APIBlueprint('services', __name__)
 sql_tags = Tag(name='SQL Query', description='SQL Query operations')
@@ -26,9 +27,14 @@ def hello():
              )
 @require_auth
 def optimize():
-    sentence = request.json["sentence"]
+    sentence = request.json["input"]
     sentence_obj = PromptRequest(input=sentence)
-    result = get_query_format(sentence_obj)
+    try:
+        result = get_query_format(sentence_obj)
+    except json.JSONDecodeError as e:
+        return {"error": str(e)}, 400
+    except Exception as e:
+        return {"error": str(e)}, 500
     return result
 
 @api.post('/db-connection/',
