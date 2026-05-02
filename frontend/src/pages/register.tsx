@@ -41,12 +41,9 @@ function Register() {
       saveToken(res.data.token)
       navigate('/dashboard')
     } catch (err: any) {
-      const errorMsg = err?.response?.data?.error || "Registration Failed"
-      const errorDetail = err?.response?.data?.message || ""
-      setError({ 
-        title: 'Registration Error', 
-        message: errorDetail ? `${errorMsg}. ${errorDetail}` : errorMsg 
-      })
+      const errorTitle = err?.response?.data?.error || "Registration Failed"
+      const errorMessage = err?.response?.data?.message || "Something went wrong. Please try again."
+      setError({ title: errorTitle, message: errorMessage })
     } finally {
       setLoading(false)
     }

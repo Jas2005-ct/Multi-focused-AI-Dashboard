@@ -16,6 +16,7 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "cryptography<3.4",
     "pyjwt>=2.8.0",
+    "tenacity>=8.2.0",
 ]
 
 [project.optional-dependencies]
