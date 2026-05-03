@@ -2,7 +2,8 @@ import axios from 'axios'
 import { getToken } from './authapi'
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL
+  baseURL: import.meta.env.VITE_API_URL,
+  withCredentials: true
 })
 
 // Add authorization header to requests
@@ -16,7 +17,7 @@ API.interceptors.request.use(((config: any) => {
 
 // SQL Query Optimization
 export const optimizeQuery = (sentence: string) =>
-  API.post('/sql-query/', { sentence })
+  API.post('/api/sql-query/', { sentence })
 
 // Database Connection Management
 export const saveDBConnection = (connectionData: {
@@ -27,10 +28,10 @@ export const saveDBConnection = (connectionData: {
   password: string
   connection_string?: string
 }) =>
-  API.post('/db-connection/', connectionData)
+  API.post('/api/db-connection/', connectionData)
 
 // Get API health check
 export const healthCheck = () =>
-  API.get('/')
+  API.get('/api/')
 
 export default API
