@@ -13,6 +13,6 @@ class QueryResponse(BaseModel):
   output_query : str = Field(..., description="Optimized SQL query")
 
 class PromptRequest(BaseModel):
-  input : str = Field(..., description="Natural language sentence to optimize")
+    sentence: str = Field(..., description="Natural language sentence to optimize")
 
     

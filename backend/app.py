@@ -21,7 +21,14 @@ info = Info(
 def create_app() -> OpenAPI:
     app = OpenAPI(__name__, info=info)
     app.secret_key = os.getenv("SECRET_KEY")
-    CORS(app)
+    
+    # Configure CORS to handle preflight and credentials
+    CORS(app, 
+         resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}},
+         supports_credentials=True,
+         allow_headers=["Content-Type", "Authorization"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+    
     app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     
