@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -15,6 +16,22 @@ from ai_dashboard.schemas import QueryResponse, PromptRequest
 logger = logging.getLogger(__name__)
 
 
+def _clean_llm_response(content: str) -> str:
+    """Clean markdown code blocks and extra whitespace from LLM response."""
+    content = content.strip()
+    
+    # Remove markdown code block wrappers
+    if content.startswith('```json'):
+        content = content[7:]
+    elif content.startswith('```'):
+        content = content[3:]
+    
+    if content.endswith('```'):
+        content = content[:-3]
+    
+    return content.strip()
+
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM API requests."""
@@ -26,18 +43,26 @@ class LLMConfig:
     max_retries: int = 3
 
 
-SQL_SYSTEM_PROMPT = """You are a senior PostgreSQL SQL Query Compiler.
+SQL_SYSTEM_PROMPT = """You are a PostgreSQL SQL Query Compiler. Output ONLY valid JSON.
 
-Your job is to convert user business requests into syntactically valid raw SQL queries.
+REQUIRED FORMAT:
+{"output_query": "YOUR_SQL_HERE"}
 
-Rules:
-1. Return only executable SQL query.
-2. No explanation.
-3. No markdown.
-4. No introductory text.
+RULES:
+- ONLY output the JSON object - no other text
+- SQL goes inside the quotes as a single string
+- Escape internal quotes: use \\" for quotes inside the SQL
+- No markdown, no explanations, no comments
 
-Return strictly in this JSON format:
-{"output_query": "YOUR_SQL_QUERY_HERE"}"""
+CORRECT EXAMPLE:
+{"output_query": "SELECT * FROM users WHERE name = \\"John\\";"}
+
+INCORRECT (never do this):
+```json
+{"output_query": "SELECT * FROM users"}
+```
+
+Your response must be ONLY the JSON object:"""
 
 
 def _build_prompt(user_text: str) -> str:
@@ -91,7 +116,7 @@ def _call_llm_api(
         "model": config.model,
         "messages": [
             {"role": "system", "content": SQL_SYSTEM_PROMPT},
-            {"role": "user", "content": _build_prompt(sentence.input)}
+            {"role": "user", "content": _build_prompt(sentence.sentence)}
         ],
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
@@ -121,14 +146,6 @@ def _call_llm_api(
         content = data["choices"][0]["message"].get("content")
         if not content:
             raise ValueError("API response has empty content")
-        
-        # Parse content if it's a JSON string inside content
-        try:
-            parsed_content = json.loads(content)
-            if isinstance(parsed_content, dict) and "output_query" in parsed_content:
-                content = parsed_content["output_query"]
-        except json.JSONDecodeError:
-            pass  # Content is not JSON, use as-is
         
         total_tokens = data.get("usage", {}).get("total_tokens", 0)
         
@@ -160,9 +177,12 @@ def _parse_response(content: str) -> QueryResponse:
     Raises:
         ValueError: For JSON parsing or validation errors
     """
+    # Clean markdown code blocks
+    cleaned = _clean_llm_response(content)
+    
     try:
         # Try parsing as JSON first
-        parsed = json.loads(content)
+        parsed = json.loads(cleaned)
         
         # Handle nested structure
         if isinstance(parsed, dict):
@@ -173,9 +193,17 @@ def _parse_response(content: str) -> QueryResponse:
         raise ValueError(f"Unexpected response type: {type(parsed)}")
         
     except json.JSONDecodeError as e:
-        # If not valid JSON, treat as raw SQL (fallback)
-        logger.warning(f"Response not valid JSON, using as raw SQL: {content[:100]}")
-        return QueryResponse(output_query=content.strip())
+        # Try regex fallback to extract output_query from malformed JSON
+        pattern = r'"output_query"\s*:\s*"(.*?)"'
+        match = re.search(pattern, cleaned, re.DOTALL)
+        if match:
+            sql = match.group(1).replace('\\"', '"').replace("\\'", "'")
+            logger.info(f"Extracted SQL using regex fallback")
+            return QueryResponse(output_query=sql)
+        
+        # If regex fails, treat as raw SQL (last resort)
+        logger.warning(f"Response not valid JSON, using as raw SQL: {cleaned[:100]}")
+        return QueryResponse(output_query=cleaned)
         
     except ValidationError as e:
         logger.error(f"Pydantic validation error: {e}")
@@ -205,13 +233,7 @@ def get_query_format(
         
         result = _parse_response(content)
         
-        return {
-            "output_query": result.output_query,
-            "metadata": {
-                "tokens_used": total_tokens,
-                "model": config.model
-            }
-        }
+        return {"output_query": result.output_query}
         
     except requests.RequestException as e:
         error_msg = f"API request failed: {str(e)}"
