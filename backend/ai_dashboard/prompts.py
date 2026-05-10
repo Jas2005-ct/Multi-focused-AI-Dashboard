@@ -91,7 +91,8 @@ def _create_session(config: LLMConfig) -> requests.Session:
 
 def _call_llm_api(
     sentence: PromptRequest,
-    config: LLMConfig
+    config: LLMConfig,
+    schema_context: Optional[str] = None
 ) -> tuple[int, str]:
     """
     Make LLM API call with retry and timeout handling.
@@ -99,6 +100,7 @@ def _call_llm_api(
     Args:
         sentence: User input request
         config: LLM configuration
+        schema_context: Optional database schema context
         
     Returns:
         Tuple of (total_tokens, content)
@@ -112,10 +114,15 @@ def _call_llm_api(
         "Content-Type": "application/json"
     }
     
+    # Build system prompt with schema context if provided
+    system_prompt = SQL_SYSTEM_PROMPT
+    if schema_context:
+        system_prompt = f"{schema_context}\n\n{SQL_SYSTEM_PROMPT}"
+    
     payload = {
         "model": config.model,
         "messages": [
-            {"role": "system", "content": SQL_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": _build_prompt(sentence.sentence)}
         ],
         "temperature": config.temperature,
@@ -136,9 +143,20 @@ def _call_llm_api(
         
         data = response.json()
         
+        # Log full response for debugging (truncate if too large)
+        debug_data = str(data)[:500] + "..." if len(str(data)) > 500 else str(data)
+        logger.debug(f"LLM API raw response: {debug_data}")
+        
+        # Check for API error responses
+        if "error" in data:
+            error_msg = data["error"].get("message", "Unknown API error")
+            error_code = data["error"].get("code", "unknown")
+            raise ValueError(f"API error: {error_code} - {error_msg}")
+        
         # Validate response structure
         if "choices" not in data or not data["choices"]:
-            raise ValueError("API response missing 'choices' field")
+            logger.error(f"Unexpected API response structure: {debug_data}")
+            raise ValueError(f"API response missing 'choices' field. Got keys: {list(data.keys())}")
         
         if "message" not in data["choices"][0]:
             raise ValueError("API response missing 'message' in first choice")
@@ -180,6 +198,12 @@ def _parse_response(content: str) -> QueryResponse:
     # Clean markdown code blocks
     cleaned = _clean_llm_response(content)
     
+    # Try to extract JSON from text that might contain other content
+    # Look for JSON object pattern
+    json_match = re.search(r'\{[^{}]*"output_query"[^{}]*\}', cleaned, re.DOTALL)
+    if json_match:
+        cleaned = json_match.group(0)
+    
     try:
         # Try parsing as JSON first
         parsed = json.loads(cleaned)
@@ -193,17 +217,25 @@ def _parse_response(content: str) -> QueryResponse:
         raise ValueError(f"Unexpected response type: {type(parsed)}")
         
     except json.JSONDecodeError as e:
-        # Try regex fallback to extract output_query from malformed JSON
-        pattern = r'"output_query"\s*:\s*"(.*?)"'
+        # Try more flexible regex fallback to extract SQL
+        # Handle cases like: {"output_query": "SELECT ..."} or {"output_query":"SELECT..."}
+        pattern = r'"output_query"\s*:\s*"(.*?(?<!\\))(?:"\s*\}|$)'
         match = re.search(pattern, cleaned, re.DOTALL)
         if match:
-            sql = match.group(1).replace('\\"', '"').replace("\\'", "'")
-            logger.info(f"Extracted SQL using regex fallback")
-            return QueryResponse(output_query=sql)
+            sql = match.group(1).replace('\\"', '"').replace("\\'", "'").replace('\\n', '\n')
+            logger.info(f"Extracted SQL using regex fallback from: {cleaned[:100]}...")
+            return QueryResponse(output_query=sql.strip())
         
-        # If regex fails, treat as raw SQL (last resort)
-        logger.warning(f"Response not valid JSON, using as raw SQL: {cleaned[:100]}")
-        return QueryResponse(output_query=cleaned)
+        # If response looks like raw SQL (contains SELECT, INSERT, etc.), use it directly
+        sql_keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER']
+        upper_cleaned = cleaned.upper().strip()
+        if any(upper_cleaned.startswith(kw) for kw in sql_keywords):
+            logger.info(f"Using raw SQL response: {cleaned[:100]}...")
+            return QueryResponse(output_query=cleaned.strip())
+        
+        # Last resort - log the problematic content
+        logger.warning(f"Response not valid JSON, using as raw text: {cleaned[:200]}")
+        return QueryResponse(output_query=cleaned.strip())
         
     except ValidationError as e:
         logger.error(f"Pydantic validation error: {e}")
@@ -212,7 +244,8 @@ def _parse_response(content: str) -> QueryResponse:
 
 def get_query_format(
     sentence: PromptRequest,
-    config: Optional[LLMConfig] = None
+    config: Optional[LLMConfig] = None,
+    schema_context: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Convert natural language to SQL query using LLM.
@@ -220,6 +253,7 @@ def get_query_format(
     Args:
         sentence: User input wrapped in PromptRequest
         config: Optional custom LLM configuration
+        schema_context: Optional database schema context for better accuracy
         
     Returns:
         Dict containing output_query or error details
@@ -227,7 +261,7 @@ def get_query_format(
     config = config or LLMConfig()
     
     try:
-        total_tokens, content = _call_llm_api(sentence, config)
+        total_tokens, content = _call_llm_api(sentence, config, schema_context)
         
         logger.debug(f"Raw LLM content: {content}")
         
@@ -249,3 +283,5 @@ def get_query_format(
         error_msg = f"Unexpected error: {str(e)}"
         logger.exception(error_msg)
         return {"error": error_msg, "error_type": "unexpected_error"}
+
+
