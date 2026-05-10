@@ -64,12 +64,18 @@ def optimize(body: PromptRequest):
                     except Exception as e:
                         logger.warning(f"Failed to fetch schema: {str(e)}")
         
-        result = get_query_format(body, schema_context)
+        result = get_query_format(body, schema_context=schema_context)
         
         # Check if result contains error
         if "error" in result:
-            status_code = 500 if result.get("error_type") == "api_error" else 400
-            return {"success": False, "error": result["error"], "output_query": None}, status_code
+            error_type = result.get("error_type")
+            if error_type == "api_error":
+                status_code = 500
+            elif error_type == "security_error":
+                status_code = 400
+            else:
+                status_code = 400
+            return {"success": False, "error": result["error"], "error_type": error_type, "output_query": None}, status_code
             
         return {
             "success": True,
@@ -82,7 +88,7 @@ def optimize(body: PromptRequest):
     except Exception as e:
         return {"success": False, "error": f"Unexpected error: {str(e)}", "output_query": None}, 500
 
-@api.post('/db-connection/',
+@api.post('/db-connection',
           tags=[db_tags],
           description='Store database connection details securely',
           responses={200: {"description": "Connection saved successfully", "content": {"application/json": {"schema": {"type": "object", "properties": {"success": {"type": "boolean"}, "message": {"type": "string"}}}}}},
@@ -116,30 +122,40 @@ def db_connection(body: DBConnectionRequest):
             try:
                 parsed = parse_connection_string(body.connection_string)
                 # Use parsed values if separate fields not provided
-                host = body.host or parsed["host"]
+                host = parsed["host"] or body.host
                 port = body.port or parsed["port"]
                 database = body.database or parsed["database"]
                 username = body.username or parsed["username"]
                 password = body.password or parsed["password"]
                 connection_string = body.connection_string
+                # Detect DB type from connection string prefix
+                if body.connection_string.startswith(('postgresql://', 'postgres://')):
+                    db_type = 'postgresql'
+                elif body.connection_string.startswith('mysql://'):
+                    db_type = 'mysql'
+                else:
+                    db_type = 'postgresql'  # Default
             except ValueError as e:
                 return {"success": False, "message": f"Invalid connection string: {str(e)}"}, 400
         else:
-            # Use separate values
+            # Use separate values - require all fields
+            if not all([body.host, body.port, body.database, body.username, body.password]):
+                return {"success": False, "message": "All database fields (host, port, database, username, password) are required when connection_string is not provided"}, 400
             host = body.host
             port = body.port
             database = body.database
             username = body.username
             password = body.password
-            connection_string = build_connection_string(host, port, database, username, password)
-
+            db_type = body.db_type or 'postgresql'
+            connection_string = build_connection_string(host, port, database, username, password, db_type)
         # Check for existing connection
         existing_conn = DBConnection.query.filter_by(
             user_id=user_id, 
             host=host,
             port=port,
             database=database,
-            username=username
+            username=username,
+            db_type=db_type
         ).first()
         
         if existing_conn:
@@ -153,7 +169,8 @@ def db_connection(body: DBConnectionRequest):
             database=database,
             username=username,
             password=password,
-            connection_string=connection_string
+            connection_string=connection_string,
+            db_type=db_type
         )
         
         db.session.add(new_conn)
@@ -164,47 +181,6 @@ def db_connection(body: DBConnectionRequest):
     except Exception as e:
         db.session.rollback()
         return {"success": False, "message": f"Failed to save connection: {str(e)}"}, 500
-
-
-@api.post('/select-connection/',
-          tags=[db_tags],
-          description='Select a database connection and list tables')
-@require_auth
-def select_connection(body: SelectConnectionRequest):
-    """Select a database connection, test it, and return tables."""
-    # Get the connection
-    conn = DBConnection.query.get(body.db_id)
-    if not conn:
-        return {"success": False, "message": "Connection not found"}, 404
-    
-    # Verify ownership
-    user = session.get('email')
-    user_record = User.query.filter_by(email=user).first()
-    if not user_record or conn.user_id != user_record.id:
-        return {"success": False, "message": "Unauthorized"}, 401
-    
-    # Test the connection using connection pool
-    test_result = connection_pool.test_connection(user_record.id, body.db_id, conn.connection_string)
-    if not test_result["success"]:
-        return test_result, 500
-    
-    # Get tables
-    try:
-        tables = get_tables(user_record.id, body.db_id, conn.connection_string)
-        return {
-            "success": True,
-            "message": "Connection successful",
-            "connection": {
-                "id": conn.id,
-                "host": conn.host,
-                "database": conn.database,
-                "username": conn.username
-            },
-            "tables": tables
-        }, 200
-    except Exception as e:
-        logger.error(f"Failed to get tables: {str(e)}")
-        return {"success": False, "message": f"Failed to list tables: {str(e)}"}, 500
 
 
 @api.post('/test-connection/',
@@ -233,7 +209,7 @@ def test_connection(body: SelectConnectionRequest):
     return result, 200 if result["success"] else 500
 
 
-@api.delete('/delete-connection/',
+@api.delete('/delete-connection',
            tags=[db_tags],
            description='Delete a database connection')
 @require_auth
@@ -267,36 +243,61 @@ def delete_connection(body: DeleteConnectionRequest):
         tags=[db_tags],
         description='Get all database connections for current user')
 @require_auth
-def get_connections():
-    """Get all saved database connections for the authenticated user."""
+def get_connections(query: SelectConnectionRequest):
+    """Get all saved database connections for the authenticated user.
+    
+    Args:
+        query: Optional query parameters including db_id to get specific connection
+
+    Return:
+        List of connections or single connection if db_id is provided
+        Creates a connection pool for the user if it doesn't exist
+    """
+
     user = session.get('email')
     user_record = User.query.filter_by(email=user).first()
     if not user_record:
         return {"success": False, "message": "User not found"}, 404
-    
-    connections = DBConnection.query.filter_by(user_id=user_record.id).all()
-    return {
-        "success": True,
-        "connections": [
-            {
-                "id": conn.id,
-                "host": conn.host,
-                "port": conn.port,
-                "database": conn.database,
-                "username": conn.username,
-                "created_at": conn.created_at.isoformat() if conn.created_at else None
-            }
-            for conn in connections
-        ]
-    }, 200
 
+    if  query and query.db_id:
+        con =  DBConnection.query.get(query.db_id)
+        if not con or con.user_id != user_record.id:
+            return {"success": False, "message": "Connection not found"}, 404
+        test_result = connection_pool.test_connection(user_record.id, query.db_id, con.connection_string)
+        if not test_result["success"]:
+            return test_result, 500
+        tables = get_tables(user_record.id, query.db_id, con.connection_string)
+        return {
+            "success": True,
+            "message": "Connection successful",
+            "connection": {
+                "id": con.id,
+                "host": con.host,
+                "port": con.port,
+                "database": con.database,
+                "username": con.username,
+                "created_at": con.created_at.isoformat() if con.created_at else None
+            },
+            "tables": tables
+        }
 
-@api.get('/test/')
-@require_auth
-def test():
-    return "Test successful!"
-
-
+    else:
+        connections = DBConnection.query.filter_by(user_id=user_record.id).all()
+        return {
+            "success": True,
+            "message": "Connections retrieved successfully",
+            "connections": [
+                {
+                    "id": conn.id,
+                    "host": conn.host,
+                    "port": conn.port,
+                    "database": conn.database,
+                    "username": conn.username,
+                    "created_at": conn.created_at.isoformat() if conn.created_at else None
+                }
+                for conn in connections
+            ]
+        }
 
     
 

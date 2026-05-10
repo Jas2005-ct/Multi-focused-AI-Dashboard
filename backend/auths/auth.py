@@ -6,7 +6,8 @@ from flask import session, redirect, url_for, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
-from auths.schemas import ValidateErrorSchema, UserSchema, ValidateSuccessSchema
+from auths.schemas import ValidateErrorSchema, UserSchema, ValidateSuccessSchema, RegisterRequest, LoginRequest
+
 auth_bp = Blueprint('auth', __name__)
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", None)
@@ -56,24 +57,23 @@ def google_callback():
     }, current_app.secret_key, algorithm='HS256')
     
     # Redirect to frontend dashboard with token
-    return redirect(f"http://localhost:5173/dashboard?token={jwt_token}")
+    frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+    return redirect(f"{frontend_url}/dashboard?token={jwt_token}")
 
 
 @auth_bp.route('/login', methods=['POST'])
 def email_login():
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    
-    if not email or not password:
+    try:
+        data = LoginRequest.model_validate(request.get_json())
+    except Exception as e:
         return jsonify(ValidateErrorSchema(
-            error="Missing Fields",
-            message="Please provide both email and password"
+            error="Validation Error",
+            message=str(e)
         ).model_dump()), 400
     
-    user = User.query.filter_by(email=email).first()
+    user = User.query.filter_by(email=data.email).first()
     
-    if not user or not user.password or not check_password_hash(user.password, password):
+    if not user or not user.password or not check_password_hash(user.password, data.password):
         return jsonify(ValidateErrorSchema(
             error="Invalid Credentials",
             message="The email or password you entered is incorrect"
@@ -93,24 +93,15 @@ def email_login():
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    name = data.get('name', '')
-    
-    if not email or not password:
+    try:
+        data = RegisterRequest.model_validate(request.get_json())
+    except Exception as e:
         return jsonify(ValidateErrorSchema(
-            error="Missing Fields",
-            message="Please provide both email and password"
+            error="Validation Error",
+            message=str(e)
         ).model_dump()), 400
     
-    if len(password) < 6:
-        return jsonify(ValidateErrorSchema(
-            error="Weak Password",
-            message="Password must be at least 6 characters"
-        ).model_dump()), 400
-    
-    existing_user = User.query.filter_by(email=email).first()
+    existing_user = User.query.filter_by(email=data.email).first()
     if existing_user:
         if existing_user.google_id:
             return jsonify(ValidateErrorSchema(
@@ -123,11 +114,11 @@ def register():
             message="An account with this email already exists. Please login instead."
         ).model_dump()), 409
     
-    hashed_password = generate_password_hash(password)
+    hashed_password = generate_password_hash(data.password)
     new_user = User(
-        email=email,
+        email=data.email,
         password=hashed_password,
-        name=name
+        name=data.name or ''
     )
     db.session.add(new_user)
     db.session.commit()

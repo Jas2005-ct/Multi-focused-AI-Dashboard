@@ -73,8 +73,7 @@ class ConnectionPoolManager:
                 pool_pre_ping=True,  # Test connections before use
                 pool_recycle=3600,  # Recycle connections after 1 hour
                 connect_args={
-                    "connect_timeout": 5,
-                    "sslmode": "require"
+                    "connect_timeout": 5
                 }
             )
             
@@ -176,12 +175,32 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
     """
     try:
         conn = connection_pool.get_connection(user_id, db_id, connection_string)
-        result = conn.execute(text("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            ORDER BY table_name
-        """))
+        
+        # Detect database type and use appropriate query
+        if connection_string.startswith(('postgresql://', 'postgres://')):
+            query = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                ORDER BY table_name
+            """
+        elif connection_string.startswith('mysql://'):
+            query = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = DATABASE()
+                ORDER BY table_name
+            """
+        else:
+            # Default to PostgreSQL
+            query = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                ORDER BY table_name
+            """
+        
+        result = conn.execute(text(query))
         tables = [row[0] for row in result]
         conn.close()
         return tables
@@ -205,12 +224,23 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
     """
     try:
         conn = connection_pool.get_connection(user_id, db_id, connection_string)
-        result = conn.execute(text("""
+        
+        # Detect database type and use appropriate schema filter
+        if connection_string.startswith(('postgresql://', 'postgres://')):
+            schema_filter = "table_schema = 'public'"
+        elif connection_string.startswith('mysql://'):
+            schema_filter = "table_schema = DATABASE()"
+        else:
+            schema_filter = "table_schema = 'public'"
+        
+        query = f"""
             SELECT column_name, data_type, is_nullable, column_default
             FROM information_schema.columns
-            WHERE table_name = :table_name
+            WHERE table_name = :table_name AND {schema_filter}
             ORDER BY ordinal_position
-        """), {"table_name": table_name})
+        """
+        
+        result = conn.execute(text(query), {"table_name": table_name})
         
         columns = []
         for row in result:
@@ -260,7 +290,6 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[st
             full_schema,
             time.time() + 600
         )
-        
         return full_schema
 
 
@@ -282,7 +311,6 @@ def format_schema_for_llm(schema: Dict[str, Any]) -> str:
         table_name = table["table_name"]
         columns = ", ".join([f"{col['name']}({col['type']})" for col in table["columns"]])
         lines.append(f"  - {table_name}: {columns}")
-    
     return "\n".join(lines)
 
 
@@ -339,10 +367,12 @@ def build_connection_string(
     Returns:
         Connection string
     """
-    conn_str = f"{db_type}://{username}:{password}@{host}:{port}/{database}"
-    # Add SSL mode for PostgreSQL (required for cloud databases like Render)
     if db_type == "postgresql":
+        conn_str = f"{db_type}://{username}:{password}@{host}:{port}/{database}"
+        # Add SSL mode for PostgreSQL (required for cloud databases like Render)
         conn_str += "?sslmode=require"
+    else:
+        conn_str = f"{db_type}://{username}:{password}@{host}:{port}/{database}"
     return conn_str
 
 
@@ -377,8 +407,13 @@ def create_connection(db_type: str, connection_string: str, timeout: int = 5):
             )
         elif db_type == "mysql":
             import pymysql
+            parsed = urlparse(connection_string)
             conn = pymysql.connect(
-                connection_string,
+                host=parsed.hostname,
+                port=parsed.port or 3306,
+                database=parsed.path.lstrip('/'),
+                user=parsed.username,
+                password=parsed.password,
                 connect_timeout=timeout,
                 ssl={'ssl_mode': 'REQUIRED'}  # Enforce SSL
             )

@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 
 
 class DBConnectionRequest(BaseModel):
@@ -7,7 +8,23 @@ class DBConnectionRequest(BaseModel):
     database: str = Field(None, description="Database name")
     username: str = Field(None, description="Database username")
     password: str = Field(None, description="Database password")
+    db_type: str = Field("postgresql", description="Database type (postgresql, mysql)")
     connection_string: str = Field(None, description="Database connection string")
+    
+    @field_validator('port')
+    @classmethod
+    def validate_port(cls, v):
+        if v is not None and not (1 <= v <= 65535):
+            raise ValueError('Port must be between 1 and 65535')
+        return v
+    
+    @field_validator('db_type')
+    @classmethod
+    def validate_db_type(cls, v):
+        allowed = ['postgresql', 'postgres', 'mysql']
+        if v and v.lower() not in allowed:
+            raise ValueError(f'db_type must be one of: {allowed}')
+        return v.lower() if v else v
 
 
 class QueryResponse(BaseModel):
@@ -15,12 +32,19 @@ class QueryResponse(BaseModel):
 
 
 class PromptRequest(BaseModel):
-    sentence: str = Field(..., description="Natural language sentence to optimize")
+    sentence: str = Field(..., description="Natural language sentence to optimize", max_length=5000)
     db_id: int = Field(None, description="Database connection ID for schema context")
+    
+    @field_validator('sentence')
+    @classmethod
+    def validate_sentence_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Sentence cannot be empty')
+        return v.strip()
 
 
 class SelectConnectionRequest(BaseModel):
-    db_id: int = Field(..., description="Database connection ID to select")
+    db_id: int = Field(None, description="Database connection ID to select")
 
 
 class DeleteConnectionRequest(BaseModel):

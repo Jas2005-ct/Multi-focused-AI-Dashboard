@@ -32,6 +32,50 @@ def _clean_llm_response(content: str) -> str:
     return content.strip()
 
 
+def _validate_sql_safety(query: str) -> tuple[bool, str]:
+    """
+    Validate SQL query for potentially dangerous patterns.
+    
+    Returns:
+        Tuple of (is_safe, error_message)
+    """
+    query_upper = query.upper().strip()
+    
+    # Dangerous patterns that should not be in generated queries
+    dangerous_patterns = [
+        # Multiple statements (injection attempt)
+        (r';\s*(DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|GRANT|REVOKE|TRUNCATE|EXEC|EXECUTE|UNION|SELECT)', 
+         "Multiple SQL statements detected - potential injection"),
+        # Union-based injection
+        (r'UNION\s+SELECT', "UNION SELECT detected - potential injection"),
+        # Comment-based injection attempts
+        (r'/\*.*\*/', "Block comment detected - potential injection"),
+        (r'--.*$', "Line comment detected - potential injection", re.MULTILINE),
+        # Stacked queries
+        (r';\s*[^\s]', "Stacked query detected - potential injection"),
+        # Time-based blind injection
+        (r'(SLEEP|BENCHMARK|WAITFOR|DELAY)\s*\(', "Time delay function detected - potential injection"),
+        # Out-of-band injection
+        (r'(LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)', "File operation detected - potential injection"),
+        # xp_cmdshell and similar
+        (r'XP_CMDSHELL|SP_OACREATE|SP_OAMETHOD', "System command execution detected"),
+    ]
+    
+    for pattern in dangerous_patterns:
+        flags = pattern[2] if len(pattern) > 2 else 0
+        if re.search(pattern[0], query_upper, flags):
+            return False, pattern[1]
+    
+    # Ensure query starts with allowed keywords (SELECT, WITH for CTEs)
+    allowed_starts = ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']
+    first_word = query_upper.split()[0] if query_upper.split() else ''
+    
+    if first_word not in allowed_starts:
+        return False, f"Query must start with SELECT, WITH, INSERT, UPDATE, or DELETE. Found: {first_word}"
+    
+    return True, ""
+
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM API requests."""
@@ -43,27 +87,66 @@ class LLMConfig:
     max_retries: int = 3
 
 
-SQL_SYSTEM_PROMPT = """You are a PostgreSQL SQL Query Compiler. Output ONLY valid JSON.
 
-REQUIRED FORMAT:
-{"output_query": "YOUR_SQL_HERE"}
+SQL_SYSTEM_PROMPT = """
+You are an expert PostgreSQL SQL Query Compiler.
 
-RULES:
-- ONLY output the JSON object - no other text
-- SQL goes inside the quotes as a single string
-- Escape internal quotes: use \\" for quotes inside the SQL
-- No markdown, no explanations, no comments
+Your responsibility is to convert user requests into valid, optimized PostgreSQL SQL queries.
 
-CORRECT EXAMPLE:
-{"output_query": "SELECT * FROM users WHERE name = \\"John\\";"}
+IMPORTANT:
+You must ALWAYS return ONLY a valid JSON object.
+Do NOT return explanations, markdown, comments, notes, code fences, or additional text.
 
-INCORRECT (never do this):
+STRICT OUTPUT FORMAT:
+{
+  "output_query": "POSTGRESQL_QUERY"
+}
+
+MANDATORY RULES:
+1. Output must be valid parsable JSON
+2. Response must contain ONLY one key:
+   - output_query
+3. SQL query must:
+   - be valid PostgreSQL syntax
+   - be production-safe
+   - be properly formatted as a single string
+4. Escape internal double quotes using:
+   \\\"
+5. Never include:
+   - markdown
+   - ``` blocks
+   - comments
+   - natural language explanations
+   - extra JSON keys
+6. If aggregation is required:
+   - always use proper GROUP BY
+7. Use explicit column names whenever possible
+8. Avoid SELECT *
+9. Generate optimized SQL queries whenever possible
+10. Preserve exact table and column names provided by the user
+
+VALID RESPONSE EXAMPLE:
+{"output_query":"SELECT id, name FROM users WHERE name = \\"John\\";"}
+
+INVALID RESPONSE EXAMPLES:
+
+Example 1:
 ```json
-{"output_query": "SELECT * FROM users"}
-```
+{"output_query":"SELECT * FROM users"}
+````
 
-Your response must be ONLY the JSON object:"""
+Example 2:
+Here is your query:
+{"output_query":"SELECT * FROM users"}
 
+Example 3:
+{
+"query":"SELECT * FROM users"
+}
+
+FINAL INSTRUCTION:
+Return ONLY the JSON object.
+"""
 
 def _build_prompt(user_text: str) -> str:
     """Build user prompt with structured output instruction."""
@@ -266,6 +349,12 @@ def get_query_format(
         logger.debug(f"Raw LLM content: {content}")
         
         result = _parse_response(content)
+        
+        # Validate SQL safety before returning
+        is_safe, error_msg = _validate_sql_safety(result.output_query)
+        if not is_safe:
+            logger.warning(f"Potentially unsafe SQL detected: {error_msg}")
+            return {"error": f"Generated query failed security validation: {error_msg}", "error_type": "security_error"}
         
         return {"output_query": result.output_query}
         
