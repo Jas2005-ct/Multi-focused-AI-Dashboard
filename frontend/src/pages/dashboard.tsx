@@ -1,15 +1,29 @@
 import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { logoutUser, getToken } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
 
+interface ActiveConnection {
+  id: number
+  host: string
+  database: string
+  username: string
+  tables: string[]
+}
+
 function Dashboard() {
   const navigate = useNavigate()
+  const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null)
 
   const handleLogout = () => {
     logoutUser()
     navigate('/')
+  }
+
+  const handleConnectionSelect = (connection: ActiveConnection | null) => {
+    setActiveConnection(connection)
   }
 
   return (
@@ -43,11 +57,11 @@ function Dashboard() {
 
         <div style={styles.grid}>
           <div style={styles.column}>
-            <SQLQueryOptimizer />
+            <SQLQueryOptimizer activeConnection={activeConnection} />
             <DBConnectionForm />
           </div>
           <div style={styles.column}>
-            <SavedConnections />
+            <SavedConnections onConnectionSelect={handleConnectionSelect} />
           </div>
         </div>
       </div>

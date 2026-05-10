@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getConnections, selectConnection, deleteConnection } from '../api/dashboardapi'
 
 interface Connection {
   id: number
@@ -6,62 +7,83 @@ interface Connection {
   port: number
   database: string
   username: string
+  created_at?: string
 }
 
-function SavedConnections() {
+interface ActiveConnection {
+  id: number
+  host: string
+  database: string
+  username: string
+  tables: string[]
+}
+
+function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connection: ActiveConnection | null) => void }) {
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [activeConnectionId, setActiveConnectionId] = useState<number | null>(null)
+  const [connectingId, setConnectingId] = useState<number | null>(null)
 
   useEffect(() => {
     loadConnections()
-    
-    const handleStorageChange = () => {
-      loadConnections()
-    }
-
-    window.addEventListener('storage', handleStorageChange)
-    
-    const handleConnectionAdded = () => {
-      setTimeout(() => loadConnections(), 100)
-    }
-    window.addEventListener('connectionAdded', handleConnectionAdded as EventListener)
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange)
-      window.removeEventListener('connectionAdded', handleConnectionAdded as EventListener)
-    }
   }, [])
 
-  const loadConnections = () => {
+  const loadConnections = async () => {
     try {
-      const saved = localStorage.getItem('dbConnections')
-      if (saved) {
-        setConnections(JSON.parse(saved))
+      setLoading(true)
+      const response = await getConnections()
+      if (response.data.success) {
+        setConnections(response.data.connections)
       } else {
-        setConnections([])
+        setMessage(response.data.message || 'Failed to load connections')
       }
-    } catch (err) {
-      console.error('Failed to load connections:', err)
-      setConnections([])
+    } catch (err: any) {
+      setMessage(err?.response?.data?.message || 'Failed to load connections')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = (id: number) => {
+  const handleConnect = async (dbId: number) => {
     try {
-      const saved = localStorage.getItem('dbConnections')
-      if (saved) {
-        const connections = JSON.parse(saved)
-        const updated = connections.filter((c: Connection) => c.id !== id)
-        localStorage.setItem('dbConnections', JSON.stringify(updated))
-        setConnections(updated)
-        setMessage('Connection removed from display')
-        setTimeout(() => setMessage(''), 3000)
+      setConnectingId(dbId)
+      const response = await selectConnection(dbId)
+      if (response.data.success) {
+        setActiveConnectionId(dbId)
+        onConnectionSelect({
+          id: response.data.connection.id,
+          host: response.data.connection.host,
+          database: response.data.connection.database,
+          username: response.data.connection.username,
+          tables: response.data.tables
+        })
+        setMessage('')
+      } else {
+        setMessage(response.data.message || 'Connection failed')
       }
-    } catch (err) {
-      console.error('Failed to delete connection:', err)
+    } catch (err: any) {
+      setMessage(err?.response?.data?.message || 'Connection failed')
+    } finally {
+      setConnectingId(null)
+    }
+  }
+
+  const handleDelete = async (dbId: number) => {
+    try {
+      const response = await deleteConnection(dbId)
+      if (response.data.success) {
+        if (activeConnectionId === dbId) {
+          setActiveConnectionId(null)
+          onConnectionSelect(null)
+        }
+        loadConnections()
+        setMessage('Connection deleted')
+      } else {
+        setMessage(response.data.message || 'Failed to delete')
+      }
+    } catch (err: any) {
+      setMessage(err?.response?.data?.message || 'Failed to delete')
     }
   }
 
@@ -131,7 +153,7 @@ function SavedConnections() {
                   <th style={styles.th}>Port</th>
                   <th style={styles.th}>Database</th>
                   <th style={styles.th}>Username</th>
-                  <th style={{...styles.th, width: '50px'}}></th>
+                  <th style={{...styles.th, width: '120px'}}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -142,16 +164,29 @@ function SavedConnections() {
                     <td style={styles.td}>{conn.database}</td>
                     <td style={styles.td}>{conn.username}</td>
                     <td style={styles.td}>
-                      <button
-                        style={styles.deleteBtn}
-                        onClick={() => handleDelete(conn.id)}
-                        title="Remove from display"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6"/>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                        </svg>
-                      </button>
+                      <div style={{display: 'flex', gap: '8px'}}>
+                        {activeConnectionId === conn.id ? (
+                          <span style={styles.activeBadge}>Active</span>
+                        ) : (
+                          <button
+                            style={styles.connectBtn}
+                            onClick={() => handleConnect(conn.id)}
+                            disabled={connectingId === conn.id}
+                          >
+                            {connectingId === conn.id ? 'Connecting...' : 'Connect'}
+                          </button>
+                        )}
+                        <button
+                          style={styles.deleteBtn}
+                          onClick={() => handleDelete(conn.id)}
+                          title="Delete connection"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -310,6 +345,26 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  connectBtn: {
+    padding: '6px 12px',
+    background: 'rgba(6, 182, 212, 0.15)',
+    border: '1px solid rgba(6, 182, 212, 0.3)',
+    borderRadius: '6px',
+    color: '#06b6d4',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  activeBadge: {
+    padding: '6px 12px',
+    background: 'rgba(34, 197, 94, 0.15)',
+    border: '1px solid rgba(34, 197, 94, 0.3)',
+    borderRadius: '6px',
+    color: '#22c55e',
+    fontSize: '12px',
+    fontWeight: 600,
   },
   footerNote: {
     display: 'flex',

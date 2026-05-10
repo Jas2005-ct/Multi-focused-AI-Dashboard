@@ -20,7 +20,21 @@ info = Info(
 
 def create_app() -> OpenAPI:
     app = OpenAPI(__name__, info=info)
-    app.secret_key = os.getenv("SECRET_KEY")
+    secret_key = os.getenv("SECRET_KEY")
+    
+    # Ensure secret key is at least 32 bytes for JWT HS256 security
+    if not secret_key or len(secret_key.encode('utf-8')) < 32:
+        import secrets
+        import warnings
+        warnings.warn(
+            "SECRET_KEY is too short (< 32 bytes) or not set. "
+            "Using a generated key. Set a proper SECRET_KEY in .env for production.",
+            RuntimeWarning
+        )
+        # Generate a 32-byte (256-bit) secure key
+        secret_key = secrets.token_urlsafe(32)
+    
+    app.secret_key = secret_key
     
     # Configure CORS to handle preflight and credentials
     CORS(app, 

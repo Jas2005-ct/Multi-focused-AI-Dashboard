@@ -34,6 +34,12 @@ function DBConnectionForm() {
   }
 
   const validateForm = (): boolean => {
+    // If connection string is provided, skip individual field validation
+    if (formData.connection_string && formData.connection_string.trim()) {
+      return true
+    }
+    
+    // Otherwise validate individual fields
     if (!formData.host.trim()) {
       setError('Host is required')
       return false
