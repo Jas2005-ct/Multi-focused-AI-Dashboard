@@ -24,7 +24,7 @@ class DBConnection(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
     # Connection details
-    name = db.Column(db.String(100))  # "Production DB", "Test DB"
+    # name = db.Column(db.String(100))  # "Production DB", "Test DB"
     db_type = db.Column(db.String(50))  # postgresql, mysql, sqlite
     host = db.Column(db.String(255))
     port = db.Column(db.Integer)
