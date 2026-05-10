@@ -28,16 +28,16 @@ export const saveDBConnection = (connectionData: {
   password: string
   connection_string?: string
 }) =>
-  API.post('/api/db-connection/', connectionData)
+  API.post('/api/db-connection', connectionData)
 
 export const selectConnection = (dbId: number) =>
-  API.post('/api/select-connection/', { db_id: dbId })
+  API.get('/api/get-connections/', { params: { db_id: dbId } })
 
 export const testConnection = (dbId: number) =>
   API.post('/api/test-connection/', { db_id: dbId })
 
 export const deleteConnection = (dbId: number) =>
-  API.delete('/api/delete-connection/', { data: { db_id: dbId } })
+  API.delete('/api/delete-connection', { data: { db_id: dbId } })
 
 export const getConnections = () =>
   API.get('/api/get-connections/')
