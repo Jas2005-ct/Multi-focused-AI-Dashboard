@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { logoutUser, getToken } from '../api/authapi'
+import { logoutUser, getUser } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
@@ -37,7 +37,7 @@ function Dashboard() {
           </div>
           <div style={styles.navRight}>
             <span style={styles.navUser}>
-              {getToken() ? 'Authenticated' : ''}
+              {getUser()?.name || ''}
             </span>
             <button onClick={handleLogout} style={styles.logoutBtn}>
               Sign Out

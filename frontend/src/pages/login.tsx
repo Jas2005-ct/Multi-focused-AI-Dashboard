@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, saveToken } from '../api/authapi'
+import { loginUser, saveToken, saveUser } from '../api/authapi'
 import ErrorModal from '../components/ErrorModal'
 
 function Login() {
@@ -29,6 +29,7 @@ function Login() {
       setLoading(true)
       const res = await loginUser(form)
       saveToken(res.data.token)
+      saveUser(res.data.user)
       navigate('/dashboard')
     } catch (err: any) {
       const errorTitle = err?.response?.data?.error || "Login Failed"
