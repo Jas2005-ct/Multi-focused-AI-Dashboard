@@ -304,10 +304,12 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
   },
   tableContainer: {
-    overflow: 'auto',
+    overflowX: 'auto' as const,
+    maxWidth: '100%',
     borderRadius: '10px',
     border: '1px solid rgba(255,255,255,0.06)',
     marginBottom: '16px',
+    WebkitOverflowScrolling: 'touch',
   },
   table: {
     width: '100%',
@@ -333,6 +335,10 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#e5e7eb',
     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
     fontSize: '13px',
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
   },
   deleteBtn: {
     background: 'none',

@@ -293,6 +293,7 @@ const styles: Record<string, React.CSSProperties> = {
   buttonGroup: {
     display: 'flex',
     gap: '12px',
+    flexWrap: 'wrap' as const,
   },
   button: {
     display: 'flex',
@@ -386,10 +387,14 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '8px',
     marginBottom: '12px',
     color: '#22c55e',
+    overflow: 'hidden',
   },
   connectionLabel: {
     fontSize: '13px',
     fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
   },
   tablesContainer: {
     display: 'flex',

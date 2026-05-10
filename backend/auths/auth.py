@@ -56,9 +56,16 @@ def google_callback():
         'exp': datetime.utcnow() + timedelta(hours=24)
     }, current_app.secret_key, algorithm='HS256')
     
-    # Redirect to frontend dashboard with token
+    # Redirect to frontend dashboard with token and user data
     frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-    return redirect(f"{frontend_url}/dashboard?token={jwt_token}")
+    import json, urllib.parse
+    user_data = {
+        'id': user.id,
+        'email': user.email,
+        'name': user.name or ''
+    }
+    user_json = urllib.parse.quote(json.dumps(user_data))
+    return redirect(f"{frontend_url}/dashboard?token={jwt_token}&user={user_json}")
 
 
 @auth_bp.route('/login', methods=['POST'])

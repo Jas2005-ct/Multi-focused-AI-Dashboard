@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { registerUser, saveToken } from '../api/authapi'
+import { registerUser, saveToken, saveUser } from '../api/authapi'
 import ErrorModal from '../components/ErrorModal'
 
 function Register() {
@@ -39,6 +39,7 @@ function Register() {
       setLoading(true)
       const res = await registerUser({ name: form.name, email: form.email, password: form.password })
       saveToken(res.data.token)
+      saveUser(res.data.user)
       navigate('/dashboard')
     } catch (err: any) {
       const errorTitle = err?.response?.data?.error || "Registration Failed"

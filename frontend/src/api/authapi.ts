@@ -26,4 +26,19 @@ export const getToken = () => {
 
 export const logoutUser = () => {
    localStorage.removeItem("token")
+   localStorage.removeItem("user")
+}
+
+export const saveUser = (user: { name: string; email: string; id: number }) => {
+   localStorage.setItem("user", JSON.stringify(user))
+}
+
+export const getUser = () => {
+   const userStr = localStorage.getItem("user")
+   if (!userStr) return null
+   try {
+      return JSON.parse(userStr) as { name: string; email: string; id: number }
+   } catch {
+      return null
+   }
 }

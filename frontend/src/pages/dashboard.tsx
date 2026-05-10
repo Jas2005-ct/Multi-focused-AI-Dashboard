@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { logoutUser, getToken } from '../api/authapi'
+import { logoutUser, getUser } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
@@ -37,7 +37,7 @@ function Dashboard() {
           </div>
           <div style={styles.navRight}>
             <span style={styles.navUser}>
-              {getToken() ? 'Authenticated' : ''}
+              {getUser()?.name || ''}
             </span>
             <button onClick={handleLogout} style={styles.logoutBtn}>
               Sign Out
@@ -55,12 +55,19 @@ function Dashboard() {
           </p>
         </div>
 
-        <div style={styles.grid}>
-          <div style={styles.column}>
-            <SQLQueryOptimizer activeConnection={activeConnection} />
-            <DBConnectionForm />
+        <div style={styles.layout}>
+          {/* Row 1: SQL Optimizer + DB Connection side by side */}
+          <div style={styles.row}>
+            <div style={styles.halfColumn}>
+              <SQLQueryOptimizer activeConnection={activeConnection} />
+            </div>
+            <div style={styles.halfColumn}>
+              <DBConnectionForm />
+            </div>
           </div>
-          <div style={styles.column}>
+
+          {/* Row 2: Saved Connections full width */}
+          <div style={styles.fullWidth}>
             <SavedConnections onConnectionSelect={handleConnectionSelect} />
           </div>
         </div>
@@ -162,15 +169,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '15px',
     margin: 0,
   },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '24px',
-  },
-  column: {
+  layout: {
     display: 'flex',
     flexDirection: 'column' as const,
     gap: '24px',
+  },
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: '24px',
+  },
+  halfColumn: {
+    flex: '1 1 400px',
+    minWidth: '0',
+  },
+  fullWidth: {
+    width: '100%',
   },
   footer: {
     textAlign: 'center' as const,
