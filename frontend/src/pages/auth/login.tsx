@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, saveToken, saveUser } from '../api/authapi'
-import ErrorModal from '../components/ErrorModal'
+import { loginUser, saveToken, saveUser } from '../../api/authapi'
+import ErrorModal from '../../components/ErrorModal'
 
 function Login() {
   const navigate = useNavigate()
