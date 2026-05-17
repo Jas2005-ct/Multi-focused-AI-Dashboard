@@ -1,8 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AuthLayout from '../components/layout/authLayout'
 import AppLayout from '../components/layout/appLayout'
-import Login from '../pages/Login'
-import Signup from '../pages/Signup'
+import Login from '../components/auth/login'
+import Signup from '../components/auth/signIn'
 import PrivateRoute from './PrivateRoute'
 import PublicRoute from './PublicRoute'
 

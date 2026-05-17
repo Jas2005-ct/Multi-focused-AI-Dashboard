@@ -3,18 +3,121 @@
     justify-content: center;
     align-items: center;
     height: 100vh;
+    color: #f8fafc;
+    background: radial-gradient(circle at top left, rgba(96, 165, 250, 0.2), transparent 28%),
+      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.18), transparent 24%),
+      linear-gradient(135deg, #060b18 25%, #0f172a 75%, #0d111e 100%);
 }
 
 .auth-layout .auth-content {
     padding: 32px;
-    background-color: #fff;
-    border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+    background-color: rgba(117, 124, 141, 0.15);
+    border-radius: 18px;
+    box-shadow: 0 4px 50px rgba(0, 0, 0, 0.32);
     min-width: 360px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: inherit;
+}
+
+.auth-layout .auth-content * {
+    color: inherit;
 }
 
 .auth-page {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    justify-content: center;
+    
+}
+
+.ant-form {
+    width: 100% !important;
+}
+
+.ant-form{
+    .ant-form-item{
+        margin-bottom: 16px;
+    }
+    .ant-form-item-explain-error {
+        margin-top: 4px;
+    }
+
+    .ant-input,
+    .ant-input-affix-wrapper {
+        font-size: 14px;
+        border-radius: 8px;
+        color: black;
+        padding: 8px 12px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        transition: border-color 0.3s ease;
+    }
+
+    .ant-input,
+    .ant-input-affix-wrapper {
+        background-color: rgba(255, 255, 255, 0.06) !important;
+        color: #f8fafc !important;
+    }
+
+    /* when focused */
+    .ant-input:focus,
+    .ant-input-affix-wrapper-focused {
+        background-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    .ant-input-affix-wrapper {
+        background-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    .ant-input-affix-wrapper input {
+        background: transparent !important;
+    }
+
+    .ant-input::placeholder {
+        color: rgba(248, 250, 252, 0.5);
+    }
+
+    .ant-form-item-explain-error{
+        color: rgb(177, 8, 8);
+        // margin-bottom: 4px;
+    }
+} 
+
+.btn-signup, .btn-login {
+    background-color: #912cc0;
+    padding: 8px 12px !important;
+    color: white;
+    font-weight: 500;
+    border-radius: 8px;
+    border: none;
+    outline: none;
+    transition: background-color 0.15s ease;
+    height: auto !important;
+}
+
+.btn-signup:hover, .btn-login:hover {
+    background-color: #872ab3e3 !important;
+   
+}
+
+.auth-layout .ant-form-item-label > label {
+    color: #f8fafc !important;
+}
+
+.form-login, .form-signup {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+}
+
+.redirect-text {
+    font-size: 14px;
+    color: #f8fafc;
+    text-align: center;
+}
+.redirect-link {
+    color: #912cc0 !important;
+    margin-left: 4px;
+    font-weight: 500;
+    transition: color 0.15s ease;
 }

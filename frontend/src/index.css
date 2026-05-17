@@ -9,7 +9,6 @@ html, body, #root {
 
 body {
   background: #ffffff;
-  color: #111827;
 }
 
 * {
@@ -37,4 +36,13 @@ select {
 .ant-table,
 .ant-steps-item-title {
   font-family: 'Roboto', sans-serif !important;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.06) inset !important;
+    -webkit-text-fill-color: #f8fafc !important;
+    transition: background-color 9999s ease-in-out 0s;
 }
