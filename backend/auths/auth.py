@@ -1,7 +1,4 @@
 import os
-import time
-import secrets
-import threading
 import logging
 from flask import session, redirect, url_for, current_app, jsonify
 from flask_openapi3 import APIBlueprint, Tag
@@ -20,6 +17,8 @@ from auths.schemas import (
     ResetPasswordRequest,
     SuccessMessageSchema,
 )
+from auths.otp_store import otp_store, generate_otp, OTP_TTL_SECONDS, OTP_MAX_ATTEMPTS
+from auths.tasks import dispatch_otp
 
 auth_bp = APIBlueprint('auth', __name__)
 auth_tag = Tag(name='Auth', description='Authentication & OTP operations')
@@ -28,17 +27,6 @@ logger = logging.getLogger(__name__)
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", None)
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", None)
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
-
-# In-memory OTP store (dev): {email: (otp, expiry_timestamp, attempts)}
-# Prod: replace with Redis / DB + Celery email task
-_otp_store: dict = {}
-_otp_lock = threading.Lock()
-OTP_TTL_SECONDS = 300
-OTP_MAX_ATTEMPTS = 5
-
-
-def _generate_otp() -> str:
-    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 @auth_bp.get('/login', tags=[auth_tag], summary='Initiate Google OAuth login')
@@ -148,20 +136,16 @@ def register(body: RegisterRequest):
 @auth_bp.post('/forgot-password', tags=[auth_tag], summary='Generate OTP for password reset',
               responses={200: SuccessMessageSchema, 400: ValidateErrorSchema, 404: ValidateErrorSchema})
 def forgot_password(body: ForgotPasswordRequest):
-    """Step 1: generate OTP, print to terminal (dev), store with TTL."""
+    """Step 1: generate OTP, store via env-driven backend, dispatch via Celery/print."""
     user = User.query.filter_by(email=body.email).first()
     if not user:
         return jsonify(ValidateErrorSchema(error="Not Found", message="No account with this email").model_dump()), 404
     if not user.password and user.google_id:
         return jsonify(ValidateErrorSchema(error="Google Account", message="This email uses Google sign-in. Please sign in with Google.").model_dump()), 400
 
-    otp = _generate_otp()
-    expiry = time.time() + OTP_TTL_SECONDS
-    with _otp_lock:
-        _otp_store[body.email] = (otp, expiry, 0)
-
-    print(f"\n{'='*50}\n[FORGOT-PASSWORD] OTP for {body.email}: {otp} (valid 5 min)\n{'='*50}\n")
-    logger.info(f"OTP for {body.email}: {otp} (expires in {OTP_TTL_SECONDS}s)")
+    otp = generate_otp()
+    otp_store.save(body.email, otp)
+    dispatch_otp(body.email, otp)
 
     return jsonify(SuccessMessageSchema(success=True, message="OTP sent — check terminal (dev) / email (prod)").model_dump()), 200
 
@@ -170,23 +154,18 @@ def forgot_password(body: ForgotPasswordRequest):
               responses={200: SuccessMessageSchema, 400: ValidateErrorSchema, 429: ValidateErrorSchema})
 def verify_otp(body: VerifyOtpRequest):
     """Step 2: verify OTP without consuming it (so reset can still use it)."""
-    with _otp_lock:
-        entry = _otp_store.get(body.email)
+    entry = otp_store.get(body.email)
     if not entry:
         return jsonify(ValidateErrorSchema(error="Invalid OTP", message="No OTP found. Request a new one.").model_dump()), 400
 
     stored_otp, expiry, attempts = entry
-    if time.time() > expiry:
-        with _otp_lock:
-            _otp_store.pop(body.email, None)
-        return jsonify(ValidateErrorSchema(error="Expired", message="OTP expired. Request a new one.").model_dump()), 400
+    # Redis store: get() already handles TTL expiry (returns None if expired)
+    # Memory store: get() handles expiry internally
     if attempts >= OTP_MAX_ATTEMPTS:
-        with _otp_lock:
-            _otp_store.pop(body.email, None)
+        otp_store.delete(body.email)
         return jsonify(ValidateErrorSchema(error="Too Many Attempts", message="Too many failed attempts. Request a new OTP.").model_dump()), 429
     if stored_otp != body.otp:
-        with _otp_lock:
-            _otp_store[body.email] = (stored_otp, expiry, attempts + 1)
+        otp_store.increment_attempts(body.email)
         return jsonify(ValidateErrorSchema(error="Invalid OTP", message="Incorrect OTP").model_dump()), 400
 
     return jsonify(SuccessMessageSchema(success=True, message="OTP verified").model_dump()), 200
@@ -196,33 +175,25 @@ def verify_otp(body: VerifyOtpRequest):
               responses={200: SuccessMessageSchema, 400: ValidateErrorSchema, 404: ValidateErrorSchema, 429: ValidateErrorSchema})
 def reset_password(body: ResetPasswordRequest):
     """Step 3: verify OTP and set new password (consumes OTP)."""
-    with _otp_lock:
-        entry = _otp_store.get(body.email)
+    entry = otp_store.get(body.email)
     if not entry:
         return jsonify(ValidateErrorSchema(error="Invalid OTP", message="No OTP found. Request a new one.").model_dump()), 400
 
     stored_otp, expiry, attempts = entry
-    if time.time() > expiry:
-        with _otp_lock:
-            _otp_store.pop(body.email, None)
-        return jsonify(ValidateErrorSchema(error="Expired", message="OTP expired. Request a new one.").model_dump()), 400
     if attempts >= OTP_MAX_ATTEMPTS:
-        with _otp_lock:
-            _otp_store.pop(body.email, None)
+        otp_store.delete(body.email)
         return jsonify(ValidateErrorSchema(error="Too Many Attempts", message="Too many failed attempts. Request a new OTP.").model_dump()), 429
     if stored_otp != body.otp:
-        with _otp_lock:
-            _otp_store[body.email] = (stored_otp, expiry, attempts + 1)
+        otp_store.increment_attempts(body.email)
         return jsonify(ValidateErrorSchema(error="Invalid OTP", message="Incorrect OTP").model_dump()), 400
-    print(body.new_password)
+
     user = User.query.filter_by(email=body.email).first()
     if not user:
         return jsonify(ValidateErrorSchema(error="Not Found", message="No account with this email").model_dump()), 404
 
     user.password = generate_password_hash(body.new_password)
     db.session.commit()
-    with _otp_lock:
-        _otp_store.pop(body.email, None)
+    otp_store.delete(body.email)
 
     logger.info(f"Password reset for {body.email}")
     return jsonify(SuccessMessageSchema(success=True, message="Password changed successfully").model_dump()), 200
