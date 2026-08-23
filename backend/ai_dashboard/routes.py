@@ -1,7 +1,7 @@
 from flask import request
 from ai_dashboard.schemas import QueryResponse, PromptRequest, SelectConnectionRequest, DeleteConnectionRequest
 from auths.models import DBConnection, db, User
-from ai_dashboard.prompts import get_query_format
+from ai_dashboard.chains import get_query_format
 from ai_dashboard.schemas import DBConnectionRequest
 from ai_dashboard.db_connections import (
     parse_connection_string, 
@@ -13,7 +13,7 @@ from ai_dashboard.db_connections import (
 )
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag
-from flask import session
+from flask import g
 import json
 import logging
 
@@ -28,8 +28,7 @@ db_tags = Tag(name='Database Connection', description='Database Connection opera
 @api.get('/')
 @require_auth
 def hello():
-    user = session.get('email')
-    return f"Hello, {user}!"
+    return f"Hello, {g.email}!"
 
 
 @api.post('/sql-query/',
@@ -53,8 +52,7 @@ def optimize(body: PromptRequest):
         # If db_id is provided, fetch schema for context
         schema_context = None
         if body.db_id:
-            user = session.get('email')
-            user_record = User.query.filter_by(email=user).first()
+            user_record = User.query.get(g.user_id)
             if user_record:
                 conn = DBConnection.query.get(body.db_id)
                 if conn and conn.user_id == user_record.id:
@@ -107,14 +105,10 @@ def db_connection(body: DBConnectionRequest):
         JSON response with success status and message
     """
     try:
-        user = session.get('email')
-        if not user:
-            return {"success": False, "message": "User not authenticated"}, 401
-            
-        user_record = User.query.filter_by(email=user).first()
+        user_record = User.query.get(g.user_id)
         if not user_record:
             return {"success": False, "message": "User not found"}, 404
-            
+
         user_id = user_record.id
         
         # Handle connection string input
@@ -189,7 +183,7 @@ def db_connection(body: DBConnectionRequest):
 @require_auth
 def test_connection(body: SelectConnectionRequest):
     """Test if a database connection is valid."""
-    db_id = body.get('db_id')
+    db_id = body.db_id
     if not db_id:
         return {"success": False, "message": "db_id is required"}, 400
     
@@ -198,9 +192,8 @@ def test_connection(body: SelectConnectionRequest):
     if not conn:
         return {"success": False, "message": "Connection not found"}, 404
     
-    # Verify ownership
-    user = session.get('email')
-    user_record = User.query.filter_by(email=user).first()
+    # Verify ownership via JWT identity
+    user_record = User.query.get(g.user_id)
     if not user_record or conn.user_id != user_record.id:
         return {"success": False, "message": "Unauthorized"}, 401
     
@@ -220,9 +213,8 @@ def delete_connection(body: DeleteConnectionRequest):
     if not conn:
         return {"success": False, "message": "Connection not found"}, 404
     
-    # Verify ownership
-    user = session.get('email')
-    user_record = User.query.filter_by(email=user).first()
+    # Verify ownership via JWT identity
+    user_record = User.query.get(g.user_id)
     if not user_record or conn.user_id != user_record.id:
         return {"success": False, "message": "Unauthorized"}, 401
     
@@ -237,7 +229,6 @@ def delete_connection(body: DeleteConnectionRequest):
     except Exception as e:
         db.session.rollback()
         return {"success": False, "message": f"Failed to delete connection: {str(e)}"}, 500
-
 
 @api.get('/get-connections/',
         tags=[db_tags],
@@ -254,8 +245,7 @@ def get_connections(query: SelectConnectionRequest):
         Creates a connection pool for the user if it doesn't exist
     """
 
-    user = session.get('email')
-    user_record = User.query.filter_by(email=user).first()
+    user_record = User.query.get(g.user_id)
     if not user_record:
         return {"success": False, "message": "User not found"}, 404
 
@@ -300,4 +290,6 @@ def get_connections(query: SelectConnectionRequest):
         }
 
     
+
+
 
