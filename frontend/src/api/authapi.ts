@@ -20,6 +20,15 @@ export const registerUser = (data: RegisterRequest) => API.post<AuthSuccess>('/a
 export const googleLoginUser = (token: string) =>
   API.post('/auth/login', { token })
 
+export const forgotPassword = (email: string) =>
+  API.post('/auth/forgot-password', { email })
+
+export const verifyOtp = (email: string, otp: string) =>
+  API.post('/auth/verify-otp', { email, otp })
+
+export const resetPassword = (email: string, otp: string, new_password: string) =>
+  API.post('/auth/reset-password', { email, otp, new_password })
+
 export default API
 
 
