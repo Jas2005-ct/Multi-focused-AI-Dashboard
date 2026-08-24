@@ -18,7 +18,7 @@ OPEN_ROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
 def get_llm(
     temperature: float = 0.1,
-    max_tokens: int = 500,
+    max_tokens: int = 1500,
     timeout: int = 30,
     max_retries: int = 3,
 ) -> ChatOpenAI:

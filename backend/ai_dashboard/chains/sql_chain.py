@@ -135,6 +135,15 @@ def get_query_format(
         return {"error": error_msg, "error_type": "security_error"}
 
     except Exception as e:
+        msg_lower = str(e).lower()
+        if "length limit" in msg_lower or "completion_tokens" in str(e):
+            error_msg = (
+                "Model response was truncated — token limit reached (completion 500 tokens, "
+                "995 prompt + 536 reasoning). Increased to 1500; please retry. "
+                "If it persists, simplify the prompt/schema."
+            )
+            logger.warning(error_msg + f" Raw: {e}")
+            return {"error": error_msg, "error_type": "api_error"}
         error_msg = f"API request failed: {str(e)}"
         logger.exception(error_msg)
         return {"error": error_msg, "error_type": "api_error"}
