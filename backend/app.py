@@ -18,8 +18,16 @@ info = Info(
     description="SQL Optimizer with OAuth"
 )
 
+jwt_security = {
+    "jwt": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+    }
+}
+
 def create_app() -> OpenAPI:
-    app = OpenAPI(__name__, info=info)
+    app = OpenAPI(__name__, info=info, security_schemes=jwt_security)
     secret_key = os.getenv("SECRET_KEY")
     
     # Ensure secret key is at least 32 bytes for JWT HS256 security
@@ -38,7 +46,12 @@ def create_app() -> OpenAPI:
     
     # Configure CORS to handle preflight and credentials
     CORS(app, 
-         resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}},
+         resources={r"/*": {"origins": [
+             "http://localhost:5173",
+             "http://127.0.0.1:5173",
+             "http://localhost:5000",
+             "http://127.0.0.1:5000"
+         ]}},
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
