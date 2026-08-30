@@ -115,6 +115,7 @@ class ConnectionPoolManager:
                 for db_id in list(self.pools[user_id].keys()):
                     self._cleanup_pool(user_id, db_id)
     
+    @contextmanager
     def get_connection(self, user_id: int, db_id: int, connection_string: str):
         """
         Get a connection from the pool.
@@ -127,8 +128,16 @@ class ConnectionPoolManager:
         Returns:
             SQLAlchemy connection
         """
+
         engine = self.get_engine(user_id, db_id, connection_string)
-        return engine.connect()
+        conn = engine.connect()
+        try:
+            yield conn
+        except Exception as e:
+            logger.error(f"Error using connection for user {user_id}, db {db_id}: {str(e)}")
+            raise
+        finally:
+            conn.close()
     
     def test_connection(self, user_id: int, db_id: int, connection_string: str) -> Dict[str, Any]:
         """
@@ -143,9 +152,8 @@ class ConnectionPoolManager:
             Dict with success status and message
         """
         try:
-            conn = self.get_connection(user_id, db_id, connection_string)
-            result = conn.execute(text("SELECT 1"))
-            conn.close()
+            with self.get_connection(user_id, db_id, connection_string) as conn:
+                conn.execute(text("SELECT 1"))
             return {"success": True, "message": "Connection successful"}
         except Exception as e:
             logger.error(f"Connection test failed: {str(e)}")
@@ -174,8 +182,6 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
         List of table names
     """
     try:
-        conn = connection_pool.get_connection(user_id, db_id, connection_string)
-        
         # Detect database type and use appropriate query
         if connection_string.startswith(('postgresql://', 'postgres://')):
             query = """
@@ -200,9 +206,9 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
                 ORDER BY table_name
             """
         
-        result = conn.execute(text(query))
-        tables = [row[0] for row in result]
-        conn.close()
+        with connection_pool.get_connection(user_id, db_id, connection_string) as conn:
+            result = conn.execute(text(query))
+            tables = [row[0] for row in result]
         return tables
     except Exception as e:
         logger.error(f"Failed to get tables: {str(e)}")
@@ -223,8 +229,6 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
         Dict with table schema information
     """
     try:
-        conn = connection_pool.get_connection(user_id, db_id, connection_string)
-        
         # Detect database type and use appropriate schema filter
         if connection_string.startswith(('postgresql://', 'postgres://')):
             schema_filter = "table_schema = 'public'"
@@ -240,18 +244,18 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
             ORDER BY ordinal_position
         """
         
-        result = conn.execute(text(query), {"table_name": table_name})
+        with connection_pool.get_connection(user_id, db_id, connection_string) as conn:
+            result = conn.execute(text(query), {"table_name": table_name})
+            
+            columns = []
+            for row in result:
+                columns.append({
+                    "name": row[0],
+                    "type": row[1],
+                    "nullable": row[2] == "YES",
+                    "default": row[3]
+                })
         
-        columns = []
-        for row in result:
-            columns.append({
-                "name": row[0],
-                "type": row[1],
-                "nullable": row[2] == "YES",
-                "default": row[3]
-            })
-        
-        conn.close()
         return {"table_name": table_name, "columns": columns}
     except Exception as e:
         logger.error(f"Failed to get table schema: {str(e)}")
@@ -291,6 +295,42 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[st
             time.time() + 600
         )
         return full_schema
+
+
+def invalidate_schema_cache(user_id: int, db_id: int = None) -> None:
+    """
+    Invalidate schema cache for a specific user/database or all databases for a user.
+    
+    Args:
+        user_id: User ID
+        db_id: Optional database connection ID. If None, invalidate all for user.
+    """
+    with _schema_cache_lock:
+        if user_id in _schema_cache:
+            if db_id is not None:
+                _schema_cache[user_id].pop(db_id, None)
+                logger.info(f"Invalidated schema cache for user {user_id}, db {db_id}")
+            else:
+                _schema_cache.pop(user_id, None)
+                logger.info(f"Invalidated all schema caches for user {user_id}")
+
+
+def invalidate_all_schema_caches() -> None:
+    """Invalidate all schema caches (use with caution)."""
+    with _schema_cache_lock:
+        _schema_cache.clear()
+        logger.info("Invalidated all schema caches")
+
+
+def get_schema_cache_stats() -> Dict[str, Any]:
+    """Get statistics about the schema cache."""
+    with _schema_cache_lock:
+        total_entries = sum(len(dbs) for dbs in _schema_cache.values())
+        return {
+            "users_cached": len(_schema_cache),
+            "total_entries": total_entries,
+            "cache_ttl_seconds": 600
+        }
 
 
 def format_schema_for_llm(schema: Dict[str, Any]) -> str:

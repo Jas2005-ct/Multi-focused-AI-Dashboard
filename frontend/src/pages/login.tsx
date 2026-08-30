@@ -76,6 +76,9 @@ function Login() {
               onChange={handleChange}
               style={styles.input}
             />
+            <div style={{ textAlign: 'right' as const }}>
+              <Link to="/forgot-password" style={{ color: '#667eea', fontSize: '13px', textDecoration: 'none' }}>Forgot password?</Link>
+            </div>
           </div>
 
           <button type="submit" disabled={loading} style={{

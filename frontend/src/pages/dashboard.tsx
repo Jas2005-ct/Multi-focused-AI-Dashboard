@@ -17,8 +17,8 @@ function Dashboard() {
   const navigate = useNavigate()
   const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null)
 
-  const handleLogout = () => {
-    logoutUser()
+  const handleLogout = async () => {
+    await logoutUser()
     navigate('/')
   }
 

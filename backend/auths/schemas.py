@@ -97,3 +97,71 @@ class LoginRequest(BaseModel):
         if not EMAIL_REGEX.match(v):
             raise ValueError('Invalid email format')
         return v.lower()
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v):
+        if not EMAIL_REGEX.match(v):
+            raise ValueError('Invalid email format')
+        return v.lower()
+
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    otp: str
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v):
+        if not EMAIL_REGEX.match(v):
+            raise ValueError('Invalid email format')
+        return v.lower()
+
+    @field_validator('otp')
+    @classmethod
+    def validate_otp(cls, v):
+        if not re.fullmatch(r'\d{6}', v):
+            raise ValueError('OTP must be 6 digits')
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v):
+        if not EMAIL_REGEX.match(v):
+            raise ValueError('Invalid email format')
+        return v.lower()
+
+    @field_validator('otp')
+    @classmethod
+    def validate_otp(cls, v):
+        if not re.fullmatch(r'\d{6}', v):
+            raise ValueError('OTP must be 6 digits')
+        return v
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'\d', v):
+            raise ValueError('Password must contain at least one digit')
+        return v
+
+
+class SuccessMessageSchema(BaseModel):
+    success: bool
+    message: str
