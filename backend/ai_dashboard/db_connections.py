@@ -297,6 +297,42 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[st
         return full_schema
 
 
+def invalidate_schema_cache(user_id: int, db_id: int = None) -> None:
+    """
+    Invalidate schema cache for a specific user/database or all databases for a user.
+    
+    Args:
+        user_id: User ID
+        db_id: Optional database connection ID. If None, invalidate all for user.
+    """
+    with _schema_cache_lock:
+        if user_id in _schema_cache:
+            if db_id is not None:
+                _schema_cache[user_id].pop(db_id, None)
+                logger.info(f"Invalidated schema cache for user {user_id}, db {db_id}")
+            else:
+                _schema_cache.pop(user_id, None)
+                logger.info(f"Invalidated all schema caches for user {user_id}")
+
+
+def invalidate_all_schema_caches() -> None:
+    """Invalidate all schema caches (use with caution)."""
+    with _schema_cache_lock:
+        _schema_cache.clear()
+        logger.info("Invalidated all schema caches")
+
+
+def get_schema_cache_stats() -> Dict[str, Any]:
+    """Get statistics about the schema cache."""
+    with _schema_cache_lock:
+        total_entries = sum(len(dbs) for dbs in _schema_cache.values())
+        return {
+            "users_cached": len(_schema_cache),
+            "total_entries": total_entries,
+            "cache_ttl_seconds": 600
+        }
+
+
 def format_schema_for_llm(schema: Dict[str, Any]) -> str:
     """
     Format database schema for inclusion in LLM prompt.

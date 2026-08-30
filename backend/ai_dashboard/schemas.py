@@ -31,6 +31,17 @@ class QueryResponse(BaseModel):
     output_query: str = Field(..., description="Optimized SQL query")
 
 
+class MetadataAnswer(BaseModel):
+    type: str = Field("answer", description="Discriminator for metadata answer")
+    answer: str = Field(..., description="Natural language answer about DB structure")
+    tables: list[str] = Field(None, description="List of table names when applicable")
+
+
+class QueryAnswer(BaseModel):
+    type: str = Field("query", description="Discriminator for generated query")
+    output_query: str = Field(..., description="Optimized SQL query")
+
+
 class PromptRequest(BaseModel):
     sentence: str = Field(..., description="Natural language sentence to optimize", max_length=5000)
     db_id: int = Field(None, description="Database connection ID for schema context")

@@ -12,6 +12,10 @@ interface ActiveConnection {
 function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
   const [sentence, setSentence] = useState('')
   const [optimizedQuery, setOptimizedQuery] = useState('')
+  const [answer, setAnswer] = useState('')
+  const [answerTables, setAnswerTables] = useState<string[]>([])
+  const [answerRows, setAnswerRows] = useState<Record<string, any>[]>([])
+  const [answerCount, setAnswerCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -35,14 +39,33 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
       if (response.data.success === false) {
         setError(response.data.error || 'Failed to optimize query')
         setOptimizedQuery('')
+        setAnswer('')
+        setAnswerTables([])
+        setAnswerRows([])
+        setAnswerCount(null)
+      } else if (response.data.type === 'answer') {
+        setAnswer(response.data.answer || '')
+        setAnswerTables(response.data.tables || [])
+        setAnswerRows(response.data.rows || [])
+        setAnswerCount(response.data.count ?? null)
+        setOptimizedQuery('')
+        setSuccess(true)
       } else {
         setOptimizedQuery(response.data.output_query)
+        setAnswer('')
+        setAnswerTables([])
+        setAnswerRows([])
+        setAnswerCount(null)
         setSuccess(true)
       }
     } catch (err: any) {
       const errorMsg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to optimize query'
       setError(errorMsg)
       setOptimizedQuery('')
+      setAnswer('')
+      setAnswerTables([])
+      setAnswerRows([])
+      setAnswerCount(null)
     } finally {
       setLoading(false)
     }
@@ -61,6 +84,10 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
   const handleClear = () => {
     setSentence('')
     setOptimizedQuery('')
+    setAnswer('')
+    setAnswerTables([])
+    setAnswerRows([])
+    setAnswerCount(null)
     setError('')
     setSuccess(false)
   }
@@ -133,13 +160,13 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
             </div>
           )}
 
-          {success && optimizedQuery && (
+          {success && (optimizedQuery || answer) && (
             <div style={styles.successAlert}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                 <polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
-              <span>Query optimized successfully!</span>
+              <span>{answer ? 'Answer ready!' : 'Query optimized successfully!'}</span>
             </div>
           )}
 
@@ -190,6 +217,47 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
             </div>
             <div style={styles.codeBlock}>
               <code style={styles.code}>{optimizedQuery}</code>
+            </div>
+          </div>
+        )}
+
+        {answer && (
+          <div style={styles.resultSection}>
+            <div style={styles.codeHeader}>
+              <span style={styles.codeLabel}>Answer</span>
+              {answerCount !== null && <span style={styles.countBadge}>{answerCount} row(s)</span>}
+            </div>
+            <div style={styles.answerBlock}>
+              <p style={styles.answerText}>{answer}</p>
+              {answerRows.length > 0 && (
+                <div style={styles.rowsTableWrap}>
+                  <table style={styles.rowsTable}>
+                    <thead>
+                      <tr>
+                        {Object.keys(answerRows[0] || {}).map((h) => (
+                          <th key={h} style={styles.th}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {answerRows.map((row, idx) => (
+                        <tr key={idx}>
+                          {Object.values(row).map((v: any, i) => (
+                            <td key={i} style={styles.td}>{String(v ?? '')}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {answerTables.length > 0 && answerRows.length === 0 && (
+                <div style={styles.tablesList}>
+                  {answerTables.map((t) => (
+                    <span key={t} style={styles.tableTag}>{t}</span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -373,6 +441,58 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: '1.7',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+  },
+  answerBlock: {
+    padding: '16px',
+    background: 'rgba(102, 126, 234, 0.08)',
+    border: '1px solid rgba(102, 126, 234, 0.2)',
+    borderRadius: '10px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '12px',
+  },
+  answerText: {
+    color: '#e0e7ff',
+    fontSize: '14px',
+    lineHeight: '1.6',
+    margin: 0,
+  },
+  countBadge: {
+    background: 'rgba(102,126,234,0.2)',
+    color: '#a5b4fc',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '11px',
+    fontWeight: 600,
+  },
+  rowsTableWrap: {
+    overflow: 'auto',
+    borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.08)',
+    maxHeight: '300px',
+  },
+  rowsTable: {
+    width: '100%',
+    borderCollapse: 'collapse' as const,
+    fontSize: '12px',
+  },
+  th: {
+    background: 'rgba(0,0,0,0.2)',
+    color: '#b8b8d0',
+    padding: '8px 12px',
+    textAlign: 'left' as const,
+    fontWeight: 600,
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+    whiteSpace: 'nowrap' as const,
+  },
+  td: {
+    padding: '8px 12px',
+    color: '#e0e7ff',
+    borderBottom: '1px solid rgba(255,255,255,0.05)',
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
   },
   connectionInfo: {
     padding: '16px',

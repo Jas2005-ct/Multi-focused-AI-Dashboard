@@ -1,7 +1,7 @@
 from flask import request
 from ai_dashboard.schemas import QueryResponse, PromptRequest, SelectConnectionRequest, DeleteConnectionRequest
 from auths.models import DBConnection, db, User
-from ai_dashboard.chains import get_query_format
+from ai_dashboard.chains.introspection_chain import get_routed_query_format
 from ai_dashboard.schemas import DBConnectionRequest
 from ai_dashboard.db_connections import (
     parse_connection_string, 
@@ -9,7 +9,9 @@ from ai_dashboard.db_connections import (
     connection_pool,
     get_tables,
     get_full_schema,
-    format_schema_for_llm
+    format_schema_for_llm,
+    invalidate_schema_cache,
+    get_schema_cache_stats
 )
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag
@@ -19,7 +21,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-api = APIBlueprint('services', __name__)
+api = APIBlueprint('services', __name__, abp_security=[{"jwt": []}])
 sql_tags = Tag(name='SQL Query', description='SQL Query operations')
 db_tags = Tag(name='Database Connection', description='Database Connection operations')
 
@@ -33,23 +35,20 @@ def hello():
 
 @api.post('/sql-query/',
          tags=[sql_tags],
-         description='Generate a SQL query from a natural language sentence',
-         responses={200: {"description": "SQL query generated successfully", "content": {"application/json": {"schema": {"type": "object", "properties": {"output_query": {"type": "string"}, "metadata": {"type": "object"}}}}}},
+         description='Generate a SQL query or answer metadata questions via tools',
+         responses={200: {"description": "Success - either SQL query or metadata answer", "content": {"application/json": {"schema": {"type": "object", "properties": {"success": {"type": "boolean"}, "type": {"type": "string", "enum": ["query", "answer"]}, "output_query": {"type": "string"}, "answer": {"type": "string"}, "tables": {"type": "array", "items": {"type": "string"}}, "metadata": {"type": "object"}}}}}},
                     400: {"description": "Bad request - invalid input"},
                     401: {"description": "Unauthorized - authentication required"},
                     500: {"description": "Internal server error"}})
 @require_auth
 def optimize(body: PromptRequest):
-    """Generate optimized SQL query from natural language input.
+    """Generate optimized SQL query or answer metadata via sqlalchemy tools.
     
-    Args:
-        body: PromptRequest containing the natural language input and optional db_id
-        
-    Returns:
-        JSON response with generated SQL query and metadata
+    Introspection sentences like 'what tables are in my db' are executed via
+    tools and return a natural language answer instead of a SQL string.
     """
     try:
-        # If db_id is provided, fetch schema for context
+        # If db_id is provided, fetch schema for context (query branch only)
         schema_context = None
         if body.db_id:
             user_record = User.query.get(g.user_id)
@@ -62,29 +61,47 @@ def optimize(body: PromptRequest):
                     except Exception as e:
                         logger.warning(f"Failed to fetch schema: {str(e)}")
         
-        result = get_query_format(body, schema_context=schema_context)
+        result = get_routed_query_format(
+            body, user_id=g.user_id, db_id=body.db_id, schema_context=schema_context
+        )
         
         # Check if result contains error
         if "error" in result:
             error_type = result.get("error_type")
             if error_type == "api_error":
                 status_code = 500
-            elif error_type == "security_error":
-                status_code = 400
+            elif error_type in ("security_error", "auth_error"):
+                status_code = 401 if error_type == "auth_error" else 400
             else:
                 status_code = 400
-            return {"success": False, "error": result["error"], "error_type": error_type, "output_query": None}, status_code
-            
+            return {"success": False, "error": result["error"], "error_type": error_type, "output_query": None, "type": "error"}, status_code
+
+        # Metadata / data answer path (via tools)
+        if result.get("type") == "answer":
+            return {
+                "success": True,
+                "type": "answer",
+                "answer": result["answer"],
+                "tables": result.get("tables", []),
+                "count": result.get("count"),
+                "rows": result.get("rows", []),
+                "table": result.get("table"),
+                "toolCalls": result.get("toolCalls", []),
+                "output_query": None,
+            }, 200
+
+        # Query path (via LLM) — keep backward compat
         return {
             "success": True,
+            "type": "query",
             "output_query": result["output_query"],
-            "metadata": result.get("metadata", {})
+            "metadata": result.get("metadata", {}),
         }, 200
         
     except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON format: {str(e)}", "output_query": None}, 400
+        return {"success": False, "error": f"Invalid JSON format: {str(e)}", "output_query": None, "type": "error"}, 400
     except Exception as e:
-        return {"success": False, "error": f"Unexpected error: {str(e)}", "output_query": None}, 500
+        return {"success": False, "error": f"Unexpected error: {str(e)}", "output_query": None, "type": "error"}, 500
 
 @api.post('/db-connection',
           tags=[db_tags],
