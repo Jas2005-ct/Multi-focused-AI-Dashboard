@@ -15,7 +15,6 @@ from langchain_core.runnables import RunnableBranch, RunnableLambda
 from ai_dashboard.schemas import PromptRequest
 from ai_dashboard.chains.sql_chain import get_query_format as sql_get_query_format
 from ai_dashboard.tools.introspection import format_introspection_answer, format_data_answer
-from ai_dashboard.chains.agent_chain import _resolve_table_alias
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +36,30 @@ _DATA_RE = re.compile(
     re.IGNORECASE,
 )
 
+_WRITE_RE = re.compile(
+    r"\b(insert|update|delete|create|alter|drop|truncate|replace|upsert|merge)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_write_intent(sentence: str) -> bool:
+    if not sentence:
+        return False
+    return bool(_WRITE_RE.search(sentence))
+
 
 def _extract_table_name(sentence: str) -> str | None:
     # Prefer "in <word> table" / "from <word> table" / last "<word> table"
     m = re.search(r"\b(?:in|from|of)\s+(\w+)\s+table\b", sentence, re.IGNORECASE)
     if m:
-        return _resolve_table_alias(m.group(1))
+        return m.group(1)
     m = re.search(r"\b(\w+)\s+table\b", sentence, re.IGNORECASE)
     if m:
         w = m.group(1).lower()
         if w in ("my", "the", "a", "an", "certificate", "certificates"):
             # for "certificate table" return certificate, but handle plural
             return w.rstrip("s") if w not in ("my", "the", "a", "an") else None
-        return _resolve_table_alias(m.group(1))
+        return m.group(1)
     return None
 
 
@@ -191,6 +201,18 @@ def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
     db_id: Optional[int] = inputs.get("db_id")
     schema_context: Optional[str] = inputs.get("schema_context")
 
+    if _is_write_intent(sentence):
+        logger.warning("BLOCKED write intent in _query_handler sentence=%r", sentence)
+        return {
+            "type": "answer",
+            "answer": "Write operation not permitted — this dashboard is read-only. INSERT/UPDATE/DELETE/CREATE/ALTER/DROP operations are blocked. Please use the Projects UI to create or modify data.",
+            "toolCalls": [],
+            "tables": [],
+            "rows": [],
+            "count": None,
+            "table": None,
+        }
+
     if not db_id or not user_id:
         # Nothing to connect to -> let the old chain attempt a generic answer
         req = PromptRequest(sentence=sentence, db_id=db_id)
@@ -206,6 +228,17 @@ def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
 def _agent_dispatch(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """Route every request to the tool-calling agent (LLM decides the tool)."""
+    if _is_write_intent(inputs.get("sentence", "")):
+        logger.warning("BLOCKED write intent in _agent_dispatch sentence=%r", inputs.get("sentence", ""))
+        return {
+            "type": "answer",
+            "answer": "Write operation not permitted — this dashboard is read-only. INSERT/UPDATE/DELETE/CREATE/ALTER/DROP operations are blocked. Please use the Projects UI to create or modify data.",
+            "toolCalls": [],
+            "tables": [],
+            "rows": [],
+            "count": None,
+            "table": None,
+        }
     from ai_dashboard.chains.agent_chain import run_agent_question
 
     sentence: str = inputs.get("sentence", "") or ""
