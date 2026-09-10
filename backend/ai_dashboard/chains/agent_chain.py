@@ -64,17 +64,7 @@ if not TOOL_LOG.handlers:
     _th.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s TOOL %(name)s: %(message)s"))
     TOOL_LOG.addHandler(_th)
 
-_WRITE_RE = re.compile(
-    r"\b(insert|update|delete|create|alter|drop|truncate|replace|upsert|merge)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_write_intent(sentence: str) -> bool:
-    """Detect write operations — all writes are blocked in read-only mode."""
-    if not sentence:
-        return False
-    return bool(_WRITE_RE.search(sentence))
+from ai_dashboard.write_guard import is_write_intent as _is_write_intent
 
 
 def _build_schema_context(user_id: int, db_id: int) -> str:
@@ -171,7 +161,7 @@ def _build_tools(user_id: int, db_id: int) -> List[Any]:
             TOOL_LOG.error("REJECTED run_sql_query(): %s", err)
             raise ValueError(err)
         conn = _resolve_connection(user_id, db_id)
-        with connection_pool.get_connection(user_id, db_id, conn.connection_string) as c:
+        with connection_pool.get_connection(user_id, db_id, conn.get_decrypted_connection_string()) as c:
             result = c.execute(text(query))
             cols = list(result.keys())
             rows = [dict(zip(cols, row)) for row in result.fetchall()]

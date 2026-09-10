@@ -4,14 +4,7 @@ import { logoutUser, getUser } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
-
-interface ActiveConnection {
-  id: number
-  host: string
-  database: string
-  username: string
-  tables: string[]
-}
+import type { ActiveConnection } from '../types/connection'
 
 function Dashboard() {
   const navigate = useNavigate()

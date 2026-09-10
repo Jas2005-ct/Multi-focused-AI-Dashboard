@@ -1,17 +1,5 @@
-import axios from 'axios'
 import type { LoginRequest, RegisterRequest, AuthSuccess } from '../types/auth'
-
-const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL
-})
-
-API.interceptors.request.use((config: any) => {
-  const token = getToken()
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
+import API from './client'
 
 export const loginUser = (data: LoginRequest) => API.post<AuthSuccess>('/auth/login', data)
 

@@ -1,19 +1,4 @@
-import axios from 'axios'
-import { getToken } from './authapi'
-
-const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  withCredentials: true
-})
-
-// Add authorization header to requests
-API.interceptors.request.use(((config: any) => {
-  const token = getToken()
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-}) as any)
+import API from './client'
 
 // SQL Query Optimization
 export const optimizeQuery = (sentence: string, dbId?: number) =>

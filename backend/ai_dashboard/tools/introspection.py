@@ -29,7 +29,7 @@ def list_tables_tool(user_id: int, db_id: int) -> List[str]:
     from ai_dashboard.db_connections import get_tables
 
     conn = _resolve_connection(user_id, db_id)
-    return get_tables(user_id, db_id, conn.connection_string)
+    return get_tables(user_id, db_id, conn.get_decrypted_connection_string())
 
 
 @tool
@@ -45,7 +45,7 @@ def describe_table_tool(user_id: int, db_id: int, table_name: str) -> Dict[str, 
     from ai_dashboard.db_connections import get_table_schema
 
     conn = _resolve_connection(user_id, db_id)
-    return get_table_schema(user_id, db_id, conn.connection_string, table_name)
+    return get_table_schema(user_id, db_id, conn.get_decrypted_connection_string(), table_name)
 
 
 @tool
@@ -54,7 +54,7 @@ def get_full_schema_tool(user_id: int, db_id: int) -> Dict[str, Any]:
     from ai_dashboard.db_connections import get_full_schema
 
     conn = _resolve_connection(user_id, db_id)
-    return get_full_schema(user_id, db_id, conn.connection_string)
+    return get_full_schema(user_id, db_id, conn.get_decrypted_connection_string())
 
 
 import re
@@ -80,10 +80,11 @@ def count_rows_tool(user_id: int, db_id: int, table_name: str) -> int:
 
     t = _validate_table_name(table_name)
     conn = _resolve_connection(user_id, db_id)
+    conn_str = conn.get_decrypted_connection_string()
     # Verify table exists
     from ai_dashboard.db_connections import get_tables
 
-    tables = get_tables(user_id, db_id, conn.connection_string)
+    tables = get_tables(user_id, db_id, conn_str)
     if t not in [x.lower() for x in tables]:
         # allow case-insensitive but keep original for query
         # try to find actual casing
@@ -92,7 +93,7 @@ def count_rows_tool(user_id: int, db_id: int, table_name: str) -> int:
             raise ValueError(f"Table '{table_name}' not found. Available: {', '.join(tables)}")
         t = actual
 
-    with connection_pool.get_connection(user_id, db_id, conn.connection_string) as c:
+    with connection_pool.get_connection(user_id, db_id, conn_str) as c:
         # quote identifier safely (postgres/mysql both accept double quotes)
         result = c.execute(text(f'SELECT COUNT(*) FROM "{t}"'))
         return int(result.scalar() or 0)
@@ -107,16 +108,17 @@ def sample_rows_tool(user_id: int, db_id: int, table_name: str, limit: int = 20)
     t = _validate_table_name(table_name)
     limit = max(1, min(int(limit), 50))
     conn = _resolve_connection(user_id, db_id)
+    conn_str = conn.get_decrypted_connection_string()
     from ai_dashboard.db_connections import get_tables
 
-    tables = get_tables(user_id, db_id, conn.connection_string)
+    tables = get_tables(user_id, db_id, conn_str)
     if t not in [x.lower() for x in tables]:
         actual = next((x for x in tables if x.lower() == t), None)
         if not actual:
             raise ValueError(f"Table '{table_name}' not found. Available: {', '.join(tables)}")
         t = actual
 
-    with connection_pool.get_connection(user_id, db_id, conn.connection_string) as c:
+    with connection_pool.get_connection(user_id, db_id, conn_str) as c:
         result = c.execute(text(f'SELECT * FROM "{t}" LIMIT :lim'), {"lim": limit})
         cols = list(result.keys())
         rows = [dict(zip(cols, row)) for row in result.fetchall()]

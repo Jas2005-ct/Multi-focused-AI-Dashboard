@@ -333,15 +333,16 @@ def get_schema_cache_stats() -> Dict[str, Any]:
         }
 
 
-def format_schema_for_llm(schema: Dict[str, Any]) -> str:
+def format_schema_for_llm(schema: Dict[str, Any], max_chars: int = 4000) -> str:
     """
-    Format database schema for inclusion in LLM prompt.
+    Format database schema for inclusion in LLM prompt, capped to max_chars.
     
     Args:
         schema: Schema dictionary
+        max_chars: Hard cap to protect token budget (default 4000 chars ~1000 tokens)
     
     Returns:
-        Formatted string for LLM
+        Formatted string for LLM, truncated with notice if needed
     """
     if not schema or "tables" not in schema:
         return ""
@@ -351,7 +352,10 @@ def format_schema_for_llm(schema: Dict[str, Any]) -> str:
         table_name = table["table_name"]
         columns = ", ".join([f"{col['name']}({col['type']})" for col in table["columns"]])
         lines.append(f"  - {table_name}: {columns}")
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    if len(result) > max_chars:
+        result = result[:max_chars] + f"\n  ... truncated {len(result)-max_chars} chars (showing {max_chars}/{len(result)})"
+    return result
 
 
 def parse_connection_string(connection_string: str) -> Dict[str, Any]:

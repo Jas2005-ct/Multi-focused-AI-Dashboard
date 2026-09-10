@@ -34,7 +34,7 @@ class QueryResponse(BaseModel):
 class MetadataAnswer(BaseModel):
     type: str = Field("answer", description="Discriminator for metadata answer")
     answer: str = Field(..., description="Natural language answer about DB structure")
-    tables: list[str] = Field(None, description="List of table names when applicable")
+    tables: list[str] | None = Field(default=None, description="List of table names when applicable")
 
 
 class QueryAnswer(BaseModel):
@@ -56,6 +56,8 @@ class PromptRequest(BaseModel):
 
 class SelectConnectionRequest(BaseModel):
     db_id: int = Field(None, description="Database connection ID to select")
+    page: int = Field(1, ge=1, description="Page number for listing")
+    per_page: int = Field(20, ge=1, le=100, description="Items per page")
 
 
 class DeleteConnectionRequest(BaseModel):

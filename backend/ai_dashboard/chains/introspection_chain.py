@@ -36,16 +36,7 @@ _DATA_RE = re.compile(
     re.IGNORECASE,
 )
 
-_WRITE_RE = re.compile(
-    r"\b(insert|update|delete|create|alter|drop|truncate|replace|upsert|merge)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_write_intent(sentence: str) -> bool:
-    if not sentence:
-        return False
-    return bool(_WRITE_RE.search(sentence))
+from ai_dashboard.write_guard import is_write_intent as _is_write_intent
 
 
 def _extract_table_name(sentence: str) -> str | None:
