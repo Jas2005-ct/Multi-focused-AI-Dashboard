@@ -24,6 +24,29 @@ npm-debug.log*
 *.swp
 *.swo
  
+# DB / Flask instance
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Vite
+.vite/
+
+# Tooling (local-only)
+.opencode/
+AGENT.md
+.cursor/
+
+# Env variants
+.env.*
+!.env.example
+
+# Misc
+*.tmp
+*.bak
+*.log
+
 # OS
 .DS_Store
 Thumbs.db
