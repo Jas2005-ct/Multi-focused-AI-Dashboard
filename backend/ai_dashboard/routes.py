@@ -56,7 +56,7 @@ def optimize(body: PromptRequest):
                 conn = DBConnection.query.get(body.db_id)
                 if conn and conn.user_id == user_record.id:
                     try:
-                        schema = get_full_schema(user_record.id, body.db_id, conn.connection_string)
+                        schema = get_full_schema(user_record.id, body.db_id, conn.get_decrypted_connection_string())
                         schema_context = format_schema_for_llm(schema)
                     except Exception as e:
                         logger.warning(f"Failed to fetch schema: {str(e)}")
@@ -172,17 +172,16 @@ def db_connection(body: DBConnectionRequest):
         if existing_conn:
             return {"success": True, "message": "Connection already exists"}, 200
         
-        # Create new connection
+        # Create new connection (encrypt secrets)
         new_conn = DBConnection(
             user_id=user_id,
             host=host,
             port=port,
             database=database,
             username=username,
-            password=password,
-            connection_string=connection_string,
             db_type=db_type
         )
+        new_conn.set_encrypted_fields(password, connection_string)
         
         db.session.add(new_conn)
         db.session.commit()
@@ -214,8 +213,8 @@ def test_connection(body: SelectConnectionRequest):
     if not user_record or conn.user_id != user_record.id:
         return {"success": False, "message": "Unauthorized"}, 401
     
-    # Test the connection
-    result = connection_pool.test_connection(user_record.id, db_id, conn.connection_string)
+    # Test the connection (decrypt)
+    result = connection_pool.test_connection(user_record.id, db_id, conn.get_decrypted_connection_string())
     return result, 200 if result["success"] else 500
 
 
@@ -270,10 +269,11 @@ def get_connections(query: SelectConnectionRequest):
         con =  DBConnection.query.get(query.db_id)
         if not con or con.user_id != user_record.id:
             return {"success": False, "message": "Connection not found"}, 404
-        test_result = connection_pool.test_connection(user_record.id, query.db_id, con.connection_string)
+        conn_str = con.get_decrypted_connection_string()
+        test_result = connection_pool.test_connection(user_record.id, query.db_id, conn_str)
         if not test_result["success"]:
             return test_result, 500
-        tables = get_tables(user_record.id, query.db_id, con.connection_string)
+        tables = get_tables(user_record.id, query.db_id, conn_str)
         return {
             "success": True,
             "message": "Connection successful",
@@ -289,10 +289,16 @@ def get_connections(query: SelectConnectionRequest):
         }
 
     else:
-        connections = DBConnection.query.filter_by(user_id=user_record.id).all()
+        page = query.page if query and query.page else 1
+        per_page = query.per_page if query and query.per_page else 20
+        pagination = DBConnection.query.filter_by(user_id=user_record.id).paginate(page=page, per_page=per_page, error_out=False)
         return {
             "success": True,
             "message": "Connections retrieved successfully",
+            "page": page,
+            "per_page": per_page,
+            "total": pagination.total,
+            "pages": pagination.pages,
             "connections": [
                 {
                     "id": conn.id,
@@ -302,7 +308,7 @@ def get_connections(query: SelectConnectionRequest):
                     "username": conn.username,
                     "created_at": conn.created_at.isoformat() if conn.created_at else None
                 }
-                for conn in connections
+                for conn in pagination.items
             ]
         }
 

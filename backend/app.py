@@ -102,4 +102,6 @@ def create_app() -> OpenAPI:
 
 
 if __name__ == '__main__':
-    create_app().run(debug=True)
+    import os as _os
+    _debug = _os.getenv("FLASK_ENV") != "production" and _os.getenv("FLASK_DEBUG") != "0"
+    create_app().run(debug=_debug)
