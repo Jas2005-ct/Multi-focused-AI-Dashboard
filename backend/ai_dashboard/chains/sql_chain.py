@@ -78,11 +78,13 @@ def _validate_sql_safety(query: str) -> tuple[bool, str]:
         if re.search(pattern[0], query_upper, flags):
             return False, pattern[1]
 
-    allowed_starts = ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']
+    allowed_starts = ['SELECT', 'WITH']
     first_word = query_upper.split()[0] if query_upper.split() else ''
 
     if first_word not in allowed_starts:
-        return False, f"Query must start with SELECT, WITH, INSERT, UPDATE, or DELETE. Found: {first_word}"
+        if first_word in ('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE', 'MERGE'):
+            return False, "Write operation not permitted — this dashboard is read-only"
+        return False, f"Query must start with SELECT or WITH. Found: {first_word}"
 
     return True, ""
 

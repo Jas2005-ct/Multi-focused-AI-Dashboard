@@ -25,7 +25,7 @@ SQL-generation chain so the endpoint never breaks.
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import (
@@ -64,30 +64,17 @@ if not TOOL_LOG.handlers:
     _th.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s TOOL %(name)s: %(message)s"))
     TOOL_LOG.addHandler(_th)
 
-TABLE_ALIASES = {
-    "resume": "portfolio_resume",
-    "cv": "portfolio_resume",
-    "profile": "user_profile",
-    "skill": "portfolio_skills",
-    "skills": "portfolio_skills",
-    "project": "portfolio_projects",
-    "projects": "portfolio_projects",
-    "experience": "portfolio_experience",
-    "work": "portfolio_experience",
-    "education": "portfolio_education",
-    "certification": "portfolio_certifications",
-    "certifications": "portfolio_certifications",
-    "contact": "user_contacts",
-    "contacts": "user_contacts",
-    "social": "user_social_links",
-    "links": "user_social_links",
-}
+_WRITE_RE = re.compile(
+    r"\b(insert|update|delete|create|alter|drop|truncate|replace|upsert|merge)\b",
+    re.IGNORECASE,
+)
 
 
-def _resolve_table_alias(table_name: str) -> str:
-    """Resolve common aliases to actual table names (case-insensitive)."""
-    normalized = table_name.strip().lower()
-    return TABLE_ALIASES.get(normalized, table_name)
+def _is_write_intent(sentence: str) -> bool:
+    """Detect write operations — all writes are blocked in read-only mode."""
+    if not sentence:
+        return False
+    return bool(_WRITE_RE.search(sentence))
 
 
 def _build_schema_context(user_id: int, db_id: int) -> str:
@@ -100,26 +87,21 @@ def _build_schema_context(user_id: int, db_id: int) -> str:
         return ""
 
 
-SYSTEM_PROMPT = """You are a database assistant for the user's PostgreSQL database.
+SYSTEM_PROMPT = """You are a read-only database assistant for the user's PostgreSQL database.
 You have tools to list tables, count rows, sample rows, describe tables, and run
 read-only SQL. To answer the user's question, call the appropriate tool(s), inspect
 the results, and then reply with a concise natural-language answer.
 Only use run_sql_query for questions the other tools cannot answer.
 Never invent table or column names — discover them with the tools first.
+READ-ONLY: All write operations (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, TRUNCATE, REPLACE, UPSERT, MERGE) are NOT permitted. If user asks to insert/update/delete, politely refuse without calling any tool.
 
 Database Schema:
 {schema_context}
 
-Table Name Aliases (use actual table names in tool calls):
-- "resume", "cv" → portfolio_resume
-- "profile" → user_profile
-- "skill", "skills" → portfolio_skills
-- "project", "projects" → portfolio_projects
-- "experience", "work" → portfolio_experience
-- "education" → portfolio_education
-- "certification", "certifications" → portfolio_certifications
-- "contact", "contacts" → user_contacts
-- "social", "links" → user_social_links
+Instructions:
+- Always use exact table names from the schema above.
+- Map user terms to the closest matching table by meaning (e.g., user says "resume" or "cv" → use portfolio_resume, "skills" → portfolio_skills).
+- If unsure, prefer get_full_schema or list_tables first, then act.
 
 Examples:
 User: "show my resume" → Call describe_table(table_name="portfolio_resume")
@@ -143,7 +125,6 @@ def _build_tools(user_id: int, db_id: int) -> List[Any]:
     @lc_tool
     def count_rows(table_name: str) -> int:
         """Count rows in a specific table. Use for 'how many X in Y table?'."""
-        table_name = _resolve_table_alias(table_name)
         TOOL_LOG.info("CALL count_rows(table_name=%r) user_id=%s db_id=%s", table_name, user_id, db_id)
         result = count_rows_tool.invoke(
             {"user_id": user_id, "db_id": db_id, "table_name": table_name}
@@ -154,7 +135,6 @@ def _build_tools(user_id: int, db_id: int) -> List[Any]:
     @lc_tool
     def sample_rows(table_name: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Return sample rows from a table. Use for 'what are the X?'."""
-        table_name = _resolve_table_alias(table_name)
         TOOL_LOG.info("CALL sample_rows(table_name=%r, limit=%s) user_id=%s db_id=%s", table_name, limit, user_id, db_id)
         result = sample_rows_tool.invoke(
             {"user_id": user_id, "db_id": db_id, "table_name": table_name, "limit": limit}
@@ -165,7 +145,6 @@ def _build_tools(user_id: int, db_id: int) -> List[Any]:
     @lc_tool
     def describe_table(table_name: str) -> Dict[str, Any]:
         """Describe the columns of a table."""
-        table_name = _resolve_table_alias(table_name)
         TOOL_LOG.info("CALL describe_table(table_name=%r) user_id=%s db_id=%s", table_name, user_id, db_id)
         result = describe_table_tool.invoke(
             {"user_id": user_id, "db_id": db_id, "table_name": table_name}
@@ -213,6 +192,19 @@ def run_agent_question(
     On any failure (including models without tool support) it falls back to
     the deterministic SQL-generation chain.
     """
+    # Block all write operations — read-only mode, no tool calls
+    if _is_write_intent(sentence):
+        logger.warning("BLOCKED write intent sentence=%r user_id=%s db_id=%s", sentence, user_id, db_id)
+        return {
+            "type": "answer",
+            "answer": "Write operation not permitted — this dashboard is read-only. INSERT/UPDATE/DELETE/CREATE/ALTER/DROP operations are blocked. Please use the Projects UI to create or modify data.",
+            "toolCalls": [],
+            "tables": [],
+            "rows": [],
+            "count": None,
+            "table": None,
+        }
+
     # Use pre-fetched schema context from routes.py, fallback to fetching if empty
     if not schema_context:
         schema_context = _build_schema_context(user_id, db_id)
@@ -259,9 +251,7 @@ def run_agent_question(
                         step, len(tool_calls),
                         ", ".join(f"{tc['name']}({json.dumps(tc.get('args', {}))})" for tc in tool_calls))
 
-            # Execute tool calls in parallel for independent operations
-            # Tools that don't depend on each other's results can run concurrently
-            def execute_tool(tc):
+            for tc in tool_calls:
                 fn = tool_map.get(tc["name"])
                 args = tc.get("args", {})
                 try:
@@ -269,21 +259,14 @@ def run_agent_question(
                 except Exception as e:  # surface tool errors back to the model
                     output = f"Error: {e}"
                     logger.error("AGENT tool %s raised: %s", tc["name"], e)
-                return tc, output
-
-            # Use ThreadPoolExecutor for parallel execution
-            with ThreadPoolExecutor(max_workers=min(len(tool_calls), 3)) as executor:
-                futures = {executor.submit(execute_tool, tc): tc for tc in tool_calls}
-                for future in as_completed(futures):
-                    tc, output = future.result()
-                    trace.append({
-                        "name": tc["name"],
-                        "args": tc.get("args", {}),
-                        "result": output if not isinstance(output, str) else output[:500],
-                    })
-                    messages.append(
-                        ToolMessage(content=str(output), tool_call_id=tc["id"])
-                    )
+                trace.append({
+                    "name": tc["name"],
+                    "args": args,
+                    "result": output if not isinstance(output, str) else output[:500],
+                })
+                messages.append(
+                    ToolMessage(content=str(output), tool_call_id=tc["id"])
+                )
 
         # Exceeded max iterations: return whatever the model produced last
         logger.warning("AGENT exceeded max iterations")
