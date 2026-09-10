@@ -10,13 +10,7 @@ interface Connection {
   created_at?: string
 }
 
-interface ActiveConnection {
-  id: number
-  host: string
-  database: string
-  username: string
-  tables: string[]
-}
+import type { ActiveConnection } from '../types/connection'
 
 function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connection: ActiveConnection | null) => void }) {
   const [connections, setConnections] = useState<Connection[]>([])

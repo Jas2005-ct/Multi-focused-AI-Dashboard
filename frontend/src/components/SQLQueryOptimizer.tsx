@@ -1,13 +1,6 @@
 import { useState } from 'react'
 import { optimizeQuery } from '../api/dashboardapi'
-
-interface ActiveConnection {
-  id: number
-  host: string
-  database: string
-  username: string
-  tables: string[]
-}
+import type { ActiveConnection } from '../types/connection'
 
 function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
   const [sentence, setSentence] = useState('')
