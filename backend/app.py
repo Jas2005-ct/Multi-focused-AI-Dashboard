@@ -1,4 +1,4 @@
-from flask import jsonify, request
+from flask import jsonify
 from flask_openapi3 import Info, OpenAPI
 from sqlalchemy import text
 
