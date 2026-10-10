@@ -1,6 +1,6 @@
-import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { logoutUser, getUser } from '../api/authapi'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { logoutUser, getUser, saveAuth, saveToken, saveUser } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
@@ -9,7 +9,29 @@ import type { ActiveConnection } from '../types/connection'
 
 function Dashboard() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null)
+
+  // Google OAuth landing: backend redirects here with ?token&refreshToken&user.
+  // Persist once, then strip credentials from the URL.
+  useEffect(() => {
+    const token = searchParams.get('token')
+    if (!token) return
+    const refreshToken = searchParams.get('refreshToken') ?? ''
+    const userParam = searchParams.get('user')
+    try {
+      const user = userParam ? JSON.parse(decodeURIComponent(userParam)) : getUser()
+      if (user && refreshToken) {
+        saveAuth({ token, refreshToken, user })
+      } else {
+        saveToken(token)
+        if (user) saveUser(user)
+      }
+    } catch {
+      saveToken(token)
+    }
+    setSearchParams({}, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleLogout = async () => {
     await logoutUser()

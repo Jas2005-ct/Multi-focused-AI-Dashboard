@@ -45,6 +45,7 @@ class ValidateErrorSchema(BaseModel):
 
 class ValidateSuccessSchema(BaseModel):
     token: str
+    refreshToken: str
     user: UserSchema
 
     model_config = {
@@ -165,3 +166,7 @@ class ResetPasswordRequest(BaseModel):
 class SuccessMessageSchema(BaseModel):
     success: bool
     message: str
+
+
+class RefreshRequest(BaseModel):
+    refreshToken: str

@@ -15,6 +15,11 @@ os.environ["ENCRYPTION_KEY"] = "phase0-test-encryption-key-32-chr!"
 os.environ["API_KEY_PROVIDER"] = "OPEN_ZEN"
 os.environ["OPEN_ZEN_API_KEY"] = "phase0-dummy-key"
 os.environ["FLASK_ENV"] = "testing"
+# Deterministic OTP path: force the in-memory store (no Redis/Celery), so
+# suite runs never depend on developer-local brokers.
+os.environ["OTP_BACKEND"] = "memory"
+os.environ.pop("REDIS_URL", None)
+os.environ.pop("CELERY_BROKER_URL", None)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -46,6 +51,17 @@ def app_client(tmp_path):
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = old_database_url
+
+
+@pytest.fixture(autouse=True)
+def _isolate_otp_store():
+    """Reset the (forced in-memory) OTP store around every test."""
+    yield
+    from auths.otp_store import otp_store
+
+    clear = getattr(otp_store, "clear", None)
+    if callable(clear):
+        clear()
 
 
 @pytest.fixture()
