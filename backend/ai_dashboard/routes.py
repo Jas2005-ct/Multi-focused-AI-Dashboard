@@ -1,6 +1,7 @@
 from flask import request
 from ai_dashboard.schemas import QueryResponse, PromptRequest, SelectConnectionRequest, DeleteConnectionRequest
-from auths.models import DBConnection, db, User
+from connections.model import DBConnection
+from auths.models import db, User
 from ai_dashboard.chains.introspection_chain import get_routed_query_format
 from ai_dashboard.schemas import DBConnectionRequest
 from ai_dashboard.db_connections import (
