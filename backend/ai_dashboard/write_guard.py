@@ -5,5 +5,6 @@ WRITE_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 def is_write_intent(sentence: str) -> bool:
     return bool(WRITE_RE.search(sentence)) if sentence else False

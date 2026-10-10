@@ -37,6 +37,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool as lc_tool
 
 from ai_dashboard.chains.llm import get_llm
+
 from ai_dashboard.tools.introspection import (
     _resolve_connection,
     count_rows_tool,
@@ -45,6 +46,7 @@ from ai_dashboard.tools.introspection import (
     list_tables_tool,
     sample_rows_tool,
 )
+
 from ai_dashboard.db_connections import connection_pool, format_schema_for_llm
 from sqlalchemy import text
 
