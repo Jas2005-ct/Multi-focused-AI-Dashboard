@@ -4,22 +4,23 @@ Dynamically configures and instantiates ChatOpenAI based on the active provider
 defined in .env (API_KEY_PROVIDER: OPEN_ZEN or OPENROUTER).
 """
 
-import os
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from langchain_openai import ChatOpenAI
 
-from settings import (
-    API_KEY_PROVIDER,
-    OPEN_ROUTER_API_KEY,
-    OPEN_ROUTER_MODEL,
-    OPEN_ROUTER_BASE_URL,
-    OPEN_ZEN_API_KEY,
-    OPEN_ZEN_MODEL,
-    OPEN_ZEN_BASE_URL,
-)
+from config import get_settings
+
+_llm_settings = get_settings()
+API_KEY_PROVIDER = _llm_settings.API_KEY_PROVIDER
+OPEN_ROUTER_API_KEY = _llm_settings.OPEN_ROUTER_API_KEY
+OPEN_ROUTER_MODEL = _llm_settings.OPEN_ROUTER_MODEL
+OPEN_ROUTER_BASE_URL = _llm_settings.OPEN_ROUTER_BASE_URL
+OPEN_ZEN_API_KEY = _llm_settings.OPEN_ZEN_API_KEY
+OPEN_ZEN_MODEL = _llm_settings.OPEN_ZEN_MODEL
+OPEN_ZEN_BASE_URL = _llm_settings.OPEN_ZEN_BASE_URL
 
 logger = logging.getLogger(__name__)
 

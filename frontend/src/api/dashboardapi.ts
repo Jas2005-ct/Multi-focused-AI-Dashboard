@@ -31,4 +31,8 @@ export const getConnections = () =>
 export const healthCheck = () =>
   API.get('/api/')
 
+// Unauthenticated liveness probe for the status badge (Phase 1)
+export const apiStatus = () =>
+  API.get('/health')
+
 export default API
