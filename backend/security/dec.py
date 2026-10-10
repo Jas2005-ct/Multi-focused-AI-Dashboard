@@ -1,43 +1,36 @@
-import jwt
-from flask import session, redirect, url_for, request, jsonify, current_app, g
 from functools import wraps
+
+import jwt
+from flask import current_app, g, jsonify, request
+
+from auths.jwt_service import decode_access
 
 
 def require_auth(f):
-    """Authenticate via JWT Bearer token first, then Flask session fallback."""
+    """Authenticate API calls via JWT Bearer access tokens only.
+
+    No session fallback (removed Phase 2): every /api and protected /auth
+    route answers 401 JSON, never a browser redirect. Expired access tokens
+    return code TOKEN_EXPIRED so the frontend can rotate exactly once via
+    POST /auth/refresh before logging out.
+    """
+
     @wraps(f)
     def wrapper(*args, **kwargs):
-        user_id = None
-        email = None
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Authentication required", "code": "MISSING_TOKEN"}), 401
+        try:
+            payload = decode_access(header[7:], current_app.secret_key)
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired", "code": "TOKEN_EXPIRED"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token", "code": "INVALID_TOKEN"}), 401
 
-        # Prefer JWT Bearer token (source of truth for API)
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            try:
-                payload = jwt.decode(
-                    token,
-                    current_app.secret_key,
-                    algorithms=['HS256']
-                )
-                user_id = payload.get('user_id')
-                email = payload.get('email')
-            except jwt.ExpiredSignatureError:
-                return jsonify({"error": "Token expired"}), 401
-            except jwt.InvalidTokenError:
-                return jsonify({"error": "Invalid token"}), 401
-
-        # Fallback to Flask session (Google OAuth browser flow)
-        if not user_id:
-            user_id = session.get('user_id')
-            email = session.get('email')
-
-        if not user_id:
-            if request.is_json or request.headers.get('Accept') == 'application/json':
-                return jsonify({"error": "Authentication required"}), 401
-            return redirect(url_for('auth.google_login'))
-
-        g.user_id = user_id
-        g.email = email
+        g.user_id = payload.get("user_id")
+        g.email = payload.get("email")
+        if not g.user_id:
+            return jsonify({"error": "Invalid token", "code": "INVALID_TOKEN"}), 401
         return f(*args, **kwargs)
+
     return wrapper

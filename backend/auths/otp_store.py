@@ -58,6 +58,11 @@ class MemoryOTPStore(OTPStore):
                 otp, expiry, attempts = entry
                 self._store[email] = (otp, expiry, attempts + 1)
 
+    def clear(self) -> None:
+        """Drop all entries. Dev/test isolation only — never use in prod."""
+        with self._lock:
+            self._store.clear()
+
 
 class RedisOTPStore(OTPStore):
     """Prod: shared Redis with TTL. Atomic via single-threaded commands."""

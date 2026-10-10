@@ -3,6 +3,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { forgotPassword, verifyOtp, resetPassword } from '../api/authapi'
 import ErrorModal from '../components/ErrorModal'
 
+/** Narrow an unknown axios failure to the backend error envelope. */
+function apiErrorOf(err: unknown): { error?: string; message?: string } | undefined {
+  return (err as { response?: { data?: { error?: string; message?: string } } })
+    ?.response?.data
+}
+
 function ForgotPassword() {
   const navigate = useNavigate()
   const [step, setStep] = useState<1 | 2 | 3>(1)
@@ -22,8 +28,9 @@ function ForgotPassword() {
       await forgotPassword(email)
       setInfo('OTP sent — check Flask terminal (dev) / email (prod). Valid 5 min.')
       setStep(2)
-    } catch (err: any) {
-      setError({ title: err?.response?.data?.error || 'Failed', message: err?.response?.data?.message || 'Try again' })
+    } catch (err: unknown) {
+      const data = apiErrorOf(err)
+      setError({ title: data?.error || 'Failed', message: data?.message || 'Try again' })
     } finally { setLoading(false) }
   }
 
@@ -36,8 +43,9 @@ function ForgotPassword() {
       await verifyOtp(email, otp)
       setInfo('OTP verified — set new password')
       setStep(3)
-    } catch (err: any) {
-      setError({ title: err?.response?.data?.error || 'Invalid OTP', message: err?.response?.data?.message || 'Try again' })
+    } catch (err: unknown) {
+      const data = apiErrorOf(err)
+      setError({ title: data?.error || 'Invalid OTP', message: data?.message || 'Try again' })
     } finally { setLoading(false) }
   }
 
@@ -50,8 +58,9 @@ function ForgotPassword() {
       await resetPassword(email, otp, newPassword)
       setInfo('Password changed — redirecting to login…')
       setTimeout(() => navigate('/'), 1200)
-    } catch (err: any) {
-      setError({ title: err?.response?.data?.error || 'Reset failed', message: err?.response?.data?.message || 'Try again' })
+    } catch (err: unknown) {
+      const data = apiErrorOf(err)
+      setError({ title: data?.error || 'Reset failed', message: data?.message || 'Try again' })
     } finally { setLoading(false) }
   }
 

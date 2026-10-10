@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { registerUser, saveToken, saveUser } from '../api/authapi'
+import { registerUser, saveAuth } from '../api/authapi'
 import { googleLoginUrl } from '../config'
 import ErrorModal from '../components/ErrorModal'
 
@@ -39,12 +39,13 @@ function Register() {
     try {
       setLoading(true)
       const res = await registerUser({ name: form.name, email: form.email, password: form.password })
-      saveToken(res.data.token)
-      saveUser(res.data.user)
+      saveAuth(res.data)
       navigate('/dashboard')
-    } catch (err: any) {
-      const errorTitle = err?.response?.data?.error || "Registration Failed"
-      const errorMessage = err?.response?.data?.message || "Something went wrong. Please try again."
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: { error?: string; message?: string } } })
+        ?.response?.data
+      const errorTitle = data?.error || "Registration Failed"
+      const errorMessage = data?.message || "Something went wrong. Please try again."
       setError({ title: errorTitle, message: errorMessage })
     } finally {
       setLoading(false)

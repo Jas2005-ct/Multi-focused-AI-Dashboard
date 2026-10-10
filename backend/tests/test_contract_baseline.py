@@ -93,10 +93,11 @@ def test_sql_query_invalid_body_without_auth_is_422(app_client):
 
 def test_get_connections_requires_auth(app_client):
     _, client = app_client
-    # NOTE (baseline quirk): plain GET has no JSON body, so require_auth
-    # issues a browser redirect instead of 401. JSON clients get 401.
+    # Phase 2: session fallback removed — every API route answers 401 JSON,
+    # never a browser redirect (supersedes the Phase 0 302 lock-in).
     plain = client.get("/api/get-connections/")
-    assert plain.status_code == 302, plain.get_data(as_text=True)
+    assert plain.status_code == 401, plain.get_data(as_text=True)
+    assert plain.get_json()["code"] == "MISSING_TOKEN"
 
     as_json = client.get("/api/get-connections/", headers={"Accept": "application/json"})
     assert as_json.status_code == 401, as_json.get_data(as_text=True)

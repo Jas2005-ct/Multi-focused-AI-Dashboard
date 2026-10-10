@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, saveToken, saveUser } from '../api/authapi'
+import { loginUser, saveAuth } from '../api/authapi'
 import { googleLoginUrl } from '../config'
 import ErrorModal from '../components/ErrorModal'
 
@@ -29,12 +29,13 @@ function Login() {
     try {
       setLoading(true)
       const res = await loginUser(form)
-      saveToken(res.data.token)
-      saveUser(res.data.user)
+      saveAuth(res.data)
       navigate('/dashboard')
-    } catch (err: any) {
-      const errorTitle = err?.response?.data?.error || "Login Failed"
-      const errorMessage = err?.response?.data?.message || "Something went wrong. Please try again."
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: { error?: string; message?: string } } })
+        ?.response?.data
+      const errorTitle = data?.error || "Login Failed"
+      const errorMessage = data?.message || "Something went wrong. Please try again."
       setError({ title: errorTitle, message: errorMessage })
     } finally {
       setLoading(false)

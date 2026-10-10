@@ -16,6 +16,20 @@ class User(db.Model):
     
     # One-to-Many: User has many DB connections
     db_connections = db.relationship('DBConnection', backref='owner', lazy=True, cascade='all, delete-orphan')
+    refresh_tokens = db.relationship('RefreshToken', backref='user', lazy=True, cascade='all, delete-orphan')
+
+
+class RefreshToken(db.Model):
+    """Server-side refresh-token family for rotation + reuse detection (Phase 2)."""
+
+    __tablename__ = 'refresh_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    revoked = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class DBConnection(db.Model):
     __tablename__ = 'db_connections'

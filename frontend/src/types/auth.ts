@@ -11,6 +11,7 @@ export interface AuthUser {
 
 export interface AuthSuccess {
   token: string
+  refreshToken: string
   user: AuthUser
 }
 
