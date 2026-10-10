@@ -2,22 +2,28 @@ import { useState } from 'react'
 import { saveDBConnection } from '../api/dashboardapi'
 
 interface ConnectionData {
+  name: string
   host: string
   port: number
   database: string
   username: string
   password: string
+  db_type: 'postgresql' | 'mysql'
   connection_string?: string
+  sslmode: string
 }
 
 function DBConnectionForm() {
   const [formData, setFormData] = useState<ConnectionData>({
+    name: '',
     host: 'localhost',
     port: 5432,
     database: '',
     username: '',
     password: '',
-    connection_string: ''
+    db_type: 'postgresql',
+    connection_string: '',
+    sslmode: 'require'
   })
 
   const [loading, setLoading] = useState(false)
@@ -25,7 +31,7 @@ function DBConnectionForm() {
   const [success, setSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData({
       ...formData,
@@ -101,12 +107,15 @@ function DBConnectionForm() {
 
       // Reset form
       setFormData({
+        name: '',
         host: 'localhost',
         port: 5432,
         database: '',
         username: '',
         password: '',
-        connection_string: ''
+        db_type: 'postgresql',
+        connection_string: '',
+        sslmode: 'require'
       })
 
     } catch (err: any) {
@@ -119,11 +128,23 @@ function DBConnectionForm() {
   }
 
   const inputFields = [
+    { name: 'name', label: 'Connection Name', type: 'text', placeholder: 'My Database', required: false },
     { name: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
     { name: 'port', label: 'Port', type: 'number', placeholder: '5432', required: true },
     { name: 'database', label: 'Database Name', type: 'text', placeholder: 'mydb', required: true },
     { name: 'username', label: 'Username', type: 'text', placeholder: 'postgres', required: true },
     { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
+    { name: 'db_type', label: 'Database Type', type: 'select', options: [
+      { value: 'postgresql', label: 'PostgreSQL' },
+      { value: 'mysql', label: 'MySQL' }
+    ], required: true },
+    { name: 'sslmode', label: 'SSL Mode', type: 'select', options: [
+      { value: 'require', label: 'Require (Recommended)' },
+      { value: 'verify-ca', label: 'Verify CA' },
+      { value: 'verify-full', label: 'Verify Full' },
+      { value: 'allow', label: 'Allow' },
+      { value: 'disable', label: 'Disable' }
+    ], required: true },
   ]
 
   const styles: Record<string, React.CSSProperties> = {
@@ -280,18 +301,33 @@ function DBConnectionForm() {
                 <label htmlFor={field.name} style={styles.label}>
                   {field.label} {field.required && <span style={{color: '#ef4444'}}>*</span>}
                 </label>
-                <input
-                  type={field.type}
-                  id={field.name}
-                  name={field.name}
-                  value={formData[field.name as keyof ConnectionData]}
-                  onChange={handleChange}
-                  disabled={loading}
-                  placeholder={field.placeholder}
-                  style={styles.input}
-                  min={field.type === 'number' ? 1 : undefined}
-                  max={field.type === 'number' ? 65535 : undefined}
-                />
+                {field.type === 'select' ? (
+                  <select
+                    id={field.name}
+                    name={field.name}
+                    value={formData[field.name as keyof ConnectionData]}
+                    onChange={handleChange}
+                    disabled={loading}
+                    style={styles.input}
+                  >
+                    {(field.options || []).map((opt: {value: string, label: string}) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={field.type}
+                    id={field.name}
+                    name={field.name}
+                    value={formData[field.name as keyof ConnectionData]}
+                    onChange={handleChange}
+                    disabled={loading}
+                    placeholder={field.placeholder}
+                    style={styles.input}
+                    min={field.type === 'number' ? 1 : undefined}
+                    max={field.type === 'number' ? 65535 : undefined}
+                  />
+                )}
               </div>
             ))}
           </div>

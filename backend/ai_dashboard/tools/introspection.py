@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 
 from langchain_core.tools import tool
 
-from auths.models import DBConnection
+from connections.model import DBConnection
 
 logger = logging.getLogger(__name__)
 

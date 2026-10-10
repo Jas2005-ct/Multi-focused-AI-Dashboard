@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { getConnections, selectConnection, deleteConnection } from '../api/dashboardapi'
+import { getConnections, deleteConnection, testConnection } from '../api/dashboardapi'
+import API from '../api/dashboardapi'
 
 interface Connection {
   id: number
@@ -8,6 +9,10 @@ interface Connection {
   database: string
   username: string
   created_at?: string
+  name?: string
+  db_type?: string
+  sslmode?: string
+  last_used?: string
 }
 
 import type { ActiveConnection } from '../types/connection'
@@ -18,16 +23,25 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const [message, setMessage] = useState('')
   const [activeConnectionId, setActiveConnectionId] = useState<number | null>(null)
   const [connectingId, setConnectingId] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pages, setPages] = useState(0)
 
   useEffect(() => {
     loadConnections()
-  }, [])
+  }, [page])
 
   const loadConnections = async () => {
     try {
       setLoading(true)
-      const response = await getConnections()
-      if (response.data.success) {
+      const response = await getConnections(page, 20)
+      // New paginated response format
+      if (response.data.data && response.data.data.connections) {
+        setConnections(response.data.data.connections)
+        setTotal(response.data.data.total)
+        setPages(response.data.data.pages)
+      } else if (response.data.success && response.data.connections) {
+        // Fallback for old format
         setConnections(response.data.connections)
       } else {
         setMessage(response.data.message || 'Failed to load connections')
@@ -42,17 +56,22 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const handleConnect = async (dbId: number) => {
     try {
       setConnectingId(dbId)
-      const response = await selectConnection(dbId)
+      const response = await testConnection(dbId)
       if (response.data.success) {
-        setActiveConnectionId(dbId)
-        onConnectionSelect({
-          id: response.data.connection.id,
-          host: response.data.connection.host,
-          database: response.data.connection.database,
-          username: response.data.connection.username,
-          tables: response.data.tables
-        })
-        setMessage('')
+        // Get full connection details with tables
+        const detailResponse = await API.get(`/api/v1/connections/${dbId}`)
+        if (detailResponse.data.data) {
+          const conn = detailResponse.data.data
+          setActiveConnectionId(dbId)
+          onConnectionSelect({
+            id: conn.id,
+            host: conn.host,
+            database: conn.database,
+            username: conn.username,
+            tables: conn.tables || []
+          })
+          setMessage('')
+        }
       } else {
         setMessage(response.data.message || 'Connection failed')
       }
@@ -139,54 +158,78 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
             <p style={styles.emptySubtext}>Add one using the connection form</p>
           </div>
         ) : (
-          <div style={styles.tableContainer}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Host</th>
-                  <th style={styles.th}>Port</th>
-                  <th style={styles.th}>Database</th>
-                  <th style={styles.th}>Username</th>
-                  <th style={{...styles.th, width: '120px'}}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {connections.map((conn) => (
-                  <tr key={conn.id} style={styles.tr}>
-                    <td style={styles.td}>{conn.host}</td>
-                    <td style={styles.td}>{conn.port}</td>
-                    <td style={styles.td}>{conn.database}</td>
-                    <td style={styles.td}>{conn.username}</td>
-                    <td style={styles.td}>
-                      <div style={{display: 'flex', gap: '8px'}}>
-                        {activeConnectionId === conn.id ? (
-                          <span style={styles.activeBadge}>Active</span>
-                        ) : (
-                          <button
-                            style={styles.connectBtn}
-                            onClick={() => handleConnect(conn.id)}
-                            disabled={connectingId === conn.id}
-                          >
-                            {connectingId === conn.id ? 'Connecting...' : 'Connect'}
-                          </button>
-                        )}
-                        <button
-                          style={styles.deleteBtn}
-                          onClick={() => handleDelete(conn.id)}
-                          title="Delete connection"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Host</th>
+                    <th style={styles.th}>Port</th>
+                    <th style={styles.th}>Database</th>
+                    <th style={styles.th}>Username</th>
+                    <th style={{...styles.th, width: '120px'}}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {connections.map((conn) => (
+                    <tr key={conn.id} style={styles.tr}>
+                      <td style={styles.td}>{conn.host}</td>
+                      <td style={styles.td}>{conn.port}</td>
+                      <td style={styles.td}>{conn.database}</td>
+                      <td style={styles.td}>{conn.username}</td>
+                      <td style={styles.td}>
+                        <div style={{display: 'flex', gap: '8px'}}>
+                          {activeConnectionId === conn.id ? (
+                            <span style={styles.activeBadge}>Active</span>
+                          ) : (
+                            <button
+                              style={styles.connectBtn}
+                              onClick={() => handleConnect(conn.id)}
+                              disabled={connectingId === conn.id}
+                            >
+                              {connectingId === conn.id ? 'Connecting...' : 'Connect'}
+                            </button>
+                          )}
+                          <button
+                            style={styles.deleteBtn}
+                            onClick={() => handleDelete(conn.id)}
+                            title="Delete connection"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {pages > 1 && (
+              <div style={styles.pagination}>
+                <button
+                  style={{...styles.pageBtn, ...(page === 1 ? styles.pageBtnDisabled : {})}}
+                  onClick={() => setPage(page - 1)}
+                  disabled={page === 1}
+                >
+                  Previous
+                </button>
+                <span style={styles.pageInfo}>
+                  Page {page} of {pages} ({total} total)
+                </span>
+                <button
+                  style={{...styles.pageBtn, ...(page === pages ? styles.pageBtnDisabled : {})}}
+                  onClick={() => setPage(page + 1)}
+                  disabled={page === pages}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         <div style={styles.footerNote}>
@@ -375,6 +418,34 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     color: '#6b7280',
     fontSize: '12px',
+  },
+  pagination: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '12px',
+    padding: '16px',
+    borderTop: '1px solid rgba(255,255,255,0.06)',
+  },
+  pageBtn: {
+    padding: '8px 16px',
+    background: 'rgba(6, 182, 212, 0.15)',
+    border: '1px solid rgba(6, 182, 212, 0.3)',
+    borderRadius: '6px',
+    color: '#06b6d4',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+    cursor: 'not-allowed',
+  },
+  pageInfo: {
+    color: '#8b8ba7',
+    fontSize: '13px',
+    fontWeight: 500,
   },
 }
 
