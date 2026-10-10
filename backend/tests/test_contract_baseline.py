@@ -51,7 +51,8 @@ def test_register_weak_password_rejected(app_client):
         "/auth/register",
         json={"email": "weak@example.com", "password": "short", "name": "W"},
     )
-    assert resp.status_code in (400, 422), resp.get_data(as_text=True)
+    # flask-openapi3 surfaces Pydantic body errors as 422.
+    assert resp.status_code == 422, resp.get_data(as_text=True)
 
 
 def test_register_duplicate_conflict(app_client, auth_headers):
@@ -105,7 +106,8 @@ def test_sql_query_rejects_empty_sentence(app_client, auth_headers):
     _, client = app_client
     headers, _ = auth_headers
     resp = client.post("/api/sql-query/", json={"sentence": "   "}, headers=headers)
-    assert resp.status_code in (400, 422), resp.get_data(as_text=True)
+    # flask-openapi3 surfaces Pydantic body errors as 422.
+    assert resp.status_code == 422, resp.get_data(as_text=True)
 
 
 # --- write_guard snapshot ---

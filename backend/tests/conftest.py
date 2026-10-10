@@ -14,7 +14,7 @@ os.environ["SECRET_KEY"] = "phase0-test-secret-key-32-chars-min!"
 os.environ["ENCRYPTION_KEY"] = "phase0-test-encryption-key-32-chr!"
 os.environ["API_KEY_PROVIDER"] = "OPEN_ZEN"
 os.environ["OPEN_ZEN_API_KEY"] = "phase0-dummy-key"
-os.environ.setdefault("FLASK_ENV", "testing")
+os.environ["FLASK_ENV"] = "testing"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,6 +24,7 @@ import pytest
 @pytest.fixture()
 def app_client(tmp_path):
     """Fresh Flask app + file SQLite DB + test client per test."""
+    old_database_url = os.environ.get("DATABASE_URL")
     db_file = tmp_path.joinpath("phase0.db").as_posix()
     os.environ["DATABASE_URL"] = f"sqlite:///{db_file}"
 
@@ -41,7 +42,10 @@ def app_client(tmp_path):
         db.session.remove()
         db.drop_all()
         ctx.pop()
-        os.environ.pop("DATABASE_URL", None)
+        if old_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = old_database_url
 
 
 @pytest.fixture()
