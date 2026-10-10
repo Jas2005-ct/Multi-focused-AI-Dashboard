@@ -3,7 +3,7 @@
 Business logic for DB connection CRUD, validation, and schema introspection.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
 from sqlalchemy import text
@@ -269,3 +269,40 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
             for r in result
         ]
     return {"table_name": table_name, "columns": columns}
+
+
+def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[str, Any]:
+    """Get full database schema with all tables and columns."""
+    tables = get_tables(user_id, db_id, connection_string)
+    full_schema = {"tables": []}
+    
+    for table in tables:
+        table_schema = get_table_schema(user_id, db_id, connection_string, table)
+        full_schema["tables"].append(table_schema)
+    
+    return full_schema
+
+
+def format_schema_for_llm(schema: Dict[str, Any], max_chars: int = 4000) -> str:
+    """
+    Format database schema for inclusion in LLM prompt, capped to max_chars.
+    
+    Args:
+        schema: Schema dictionary
+        max_chars: Hard cap to protect token budget (default 4000 chars ~1000 tokens)
+    
+    Returns:
+        Formatted string for LLM, truncated with notice if needed
+    """
+    if not schema or "tables" not in schema:
+        return ""
+    
+    lines = ["Database Schema:"]
+    for table in schema["tables"]:
+        table_name = table["table_name"]
+        columns = ", ".join([f"{col['name']}({col['type']})" for col in table["columns"]])
+        lines.append(f"  - {table_name}: {columns}")
+    result = "\n".join(lines)
+    if len(result) > max_chars:
+        result = result[:max_chars] + f"\n  ... truncated {len(result)-max_chars} chars (showing {max_chars}/{len(result)})"
+    return result

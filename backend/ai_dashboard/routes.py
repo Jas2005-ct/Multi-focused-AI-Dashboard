@@ -1,18 +1,19 @@
 from flask import request
-from ai_dashboard.schemas import QueryResponse, PromptRequest, SelectConnectionRequest, DeleteConnectionRequest
+from ai_dashboard.schemas import (
+    QueryResponse, PromptRequest, SelectConnectionRequest, DeleteConnectionRequest,
+    AIQueryRequest, AIQueryResponse, DBConnectionRequest
+)
 from connections.model import DBConnection
 from auths.models import db, User
 from ai_dashboard.chains.introspection_chain import get_routed_query_format
-from ai_dashboard.schemas import DBConnectionRequest
-from ai_dashboard.db_connections import (
-    parse_connection_string, 
-    build_connection_string, 
+from ai_dashboard.chains.sql_chain import get_query_format as lcel_get_query_format
+from connections.service import (
+    parse_connection_string,
+    build_connection_string,
     connection_pool,
     get_tables,
     get_full_schema,
     format_schema_for_llm,
-    invalidate_schema_cache,
-    get_schema_cache_stats
 )
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag
@@ -91,7 +92,7 @@ def optimize(body: PromptRequest):
                 "output_query": None,
             }, 200
 
-        # Query path (via LLM) — keep backward compat
+# Query path (via LLM) — keep backward compat
         return {
             "success": True,
             "type": "query",
@@ -103,6 +104,113 @@ def optimize(body: PromptRequest):
         return {"success": False, "error": f"Invalid JSON format: {str(e)}", "output_query": None, "type": "error"}, 400
     except Exception as e:
         return {"success": False, "error": f"Unexpected error: {str(e)}", "output_query": None, "type": "error"}, 500
+
+
+@api.post('/ai/query',
+          tags=[sql_tags],
+          description='AI-powered SQL generation or data answers via LangGraph agent or LCEL chain',
+          responses={
+              200: {"description": "Success - SQL query or natural language answer", "content": {"application/json": {"schema": {"type": "object", "properties": {
+                  "success": {"type": "boolean"},
+                  "type": {"type": "string", "enum": ["query", "answer"]},
+                  "sql": {"type": "string"},
+                  "answer": {"type": "string"},
+                  "rows": {"type": "array", "items": {"type": "object"}},
+                  "count": {"type": "integer"},
+                  "tables": {"type": "array", "items": {"type": "string"}},
+                  "toolCalls": {"type": "array", "items": {"type": "object"}},
+                  "metadata": {"type": "object"},
+                  "usage": {"type": "object"}
+              }}}}},
+              400: {"description": "Bad request - invalid input"},
+              401: {"description": "Unauthorized - authentication required"},
+              500: {"description": "Internal server error"}
+          })
+@require_auth
+def ai_query(body: AIQueryRequest):
+    """AI-powered SQL generation or data answers.
+    
+    Modes:
+    - auto: LangGraph ReAct agent (default) — decides which tool to call
+    - sql: LCEL chain for direct SQL generation
+    - answer: Data-only mode (agent with answer-only output)
+    """
+    try:
+        # Fetch schema context if connection_id provided
+        schema_context = None
+        if body.connection_id:
+            user_record = User.query.get(g.user_id)
+            if user_record:
+                conn = DBConnection.query.get(body.connection_id)
+                if conn and conn.user_id == user_record.id:
+                    try:
+                        schema = get_full_schema(user_record.id, body.connection_id, conn.get_decrypted_connection_string())
+                        schema_context = format_schema_for_llm(schema)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch schema: {str(e)}")
+        
+        if body.mode == "sql":
+            # Direct LCEL chain for SQL generation
+            result = lcel_get_query_format(PromptRequest(sentence=body.query, db_id=body.connection_id), schema_context=schema_context)
+            if "error" in result:
+                error_type = result.get("error_type")
+                status_code = 500 if error_type == "api_error" else (401 if error_type == "auth_error" else 400)
+                return {"success": False, "error": result["error"], "error_type": error_type}, status_code
+            return {
+                "success": True,
+                "type": "query",
+                "sql": result.get("sql") or result.get("output_query"),
+                "metadata": result.get("metadata", {}),
+            }, 200
+        
+        # Agent mode (auto or answer)
+        result = get_routed_query_format(
+            PromptRequest(sentence=body.query, db_id=body.connection_id),
+            user_id=g.user_id,
+            db_id=body.connection_id,
+            schema_context=schema_context
+        )
+        
+        # Check if result contains error
+        if "error" in result:
+            error_type = result.get("error_type")
+            if error_type == "api_error":
+                status_code = 500
+            elif error_type in ("security_error", "auth_error"):
+                status_code = 401 if error_type == "auth_error" else 400
+            else:
+                status_code = 400
+            return {"success": False, "error": result["error"], "error_type": error_type}, status_code
+        
+        # Answer path (via tools)
+        if result.get("type") == "answer":
+            return {
+                "success": True,
+                "type": "answer",
+                "answer": result["answer"],
+                "tables": result.get("tables", []),
+                "count": result.get("count"),
+                "rows": result.get("rows", []),
+                "table": result.get("table"),
+                "toolCalls": result.get("toolCalls", []),
+                "usage": result.get("usage"),
+            }, 200
+        
+        # Query path (via agent's SQL generation)
+        return {
+            "success": True,
+            "type": "query",
+            "sql": result.get("output_query") or result.get("sql"),
+            "metadata": result.get("metadata", {}),
+            "toolCalls": result.get("toolCalls", []),
+            "usage": result.get("usage"),
+        }, 200
+        
+    except json.JSONDecodeError as e:
+        return {"success": False, "error": f"Invalid JSON format: {str(e)}"}, 400
+    except Exception as e:
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}, 500
+
 
 @api.post('/db-connection',
           tags=[db_tags],

@@ -1,0 +1,20 @@
+# Few-shot examples for SQL generation (Phase 4)
+# Each example: {question, sql}
+
+- question: "List all tables in the database"
+  sql: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;"
+
+- question: "Count rows in users table"
+  sql: "SELECT COUNT(*) FROM users;"
+
+- question: "Show me the schema of the orders table"
+  sql: "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'orders' AND table_schema = 'public' ORDER BY ordinal_position;"
+
+- question: "Get all active users created in the last 30 days"
+  sql: "SELECT * FROM users WHERE active = true AND created_at >= NOW() - INTERVAL '30 days' ORDER BY created_at DESC;"
+
+- question: "How many orders per user?"
+  sql: "SELECT user_id, COUNT(*) AS order_count FROM orders GROUP BY user_id ORDER BY order_count DESC;"
+
+- question: "Show recent orders with user details"
+  sql: "SELECT o.id, o.user_id, o.total, o.created_at, u.email FROM orders o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT 20;"

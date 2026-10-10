@@ -1,7 +1,9 @@
+from flask import jsonify, request
 from flask_openapi3 import Info, OpenAPI
 from sqlalchemy import text
 
 from ai_dashboard.routes import api as service_api
+from ai_dashboard.routes_v1 import v1 as service_api_v1
 from auths.auth import auth_bp
 from auths.models import db
 from common.errors import register_error_handlers
@@ -9,6 +11,7 @@ from common.request_id import register_request_id
 from config import get_settings
 from connections.routes import api as connections_api
 from extensions import init_cors, init_limiter, init_migrations, init_oauth
+from security.dec import require_auth
 
 
 def create_app() -> OpenAPI:
@@ -81,7 +84,84 @@ def create_app() -> OpenAPI:
     # Register blueprints / APIs
     app.register_api(auth_bp, url_prefix="/auth")
     app.register_api(service_api, url_prefix="/api")
+    app.register_api(service_api_v1)  # already has /api/v1 prefix
     app.register_api(connections_api)  # already has /api/v1 prefix
+
+    # Deprecation shims for old endpoints (Phase 5)
+    # These keep old endpoints working but add deprecation headers
+    @app.route("/api/sql-query/", methods=["POST"])
+    @require_auth
+    def _deprecated_sql_query():
+        from ai_dashboard.routes import optimize as optimize_impl
+        resp = optimize_impl()
+        resp = resp if isinstance(resp, tuple) else (resp, 200)
+        resp_obj = resp[0] if isinstance(resp, tuple) else resp
+        if hasattr(resp_obj, 'headers'):
+            resp_obj.headers["Deprecation"] = "true"
+            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/ai/query>; rel="successor-version"'
+        return resp
+
+    @app.route("/api/db-connection", methods=["POST"])
+    @require_auth
+    def _deprecated_db_connection():
+        from ai_dashboard.routes import db_connection as db_connection_impl
+        resp = db_connection_impl()
+        if isinstance(resp, tuple):
+            resp_obj = resp[0]
+        else:
+            resp_obj = resp
+        if hasattr(resp_obj, 'headers'):
+            resp_obj.headers["Deprecation"] = "true"
+            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections>; rel="successor-version"'
+        return resp
+
+    @app.route("/api/get-connections/", methods=["GET"])
+    @require_auth
+    def _deprecated_get_connections():
+        from ai_dashboard.routes import get_connections as get_connections_impl
+        resp = get_connections_impl()
+        if isinstance(resp, tuple):
+            resp_obj = resp[0]
+        else:
+            resp_obj = resp
+        if hasattr(resp_obj, 'headers'):
+            resp_obj.headers["Deprecation"] = "true"
+            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections>; rel="successor-version"'
+        return resp
+
+    @app.route("/api/test-connection/", methods=["POST"])
+    @require_auth
+    def _deprecated_test_connection():
+        from ai_dashboard.routes import test_connection as test_connection_impl
+        resp = test_connection_impl()
+        if isinstance(resp, tuple):
+            resp_obj = resp[0]
+        else:
+            resp_obj = resp
+        if hasattr(resp_obj, 'headers'):
+            resp_obj.headers["Deprecation"] = "true"
+            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections/:id/test>; rel="successor-version"'
+        return resp
+
+    @app.route("/api/delete-connection", methods=["DELETE"])
+    @require_auth
+    def _deprecated_delete_connection():
+        from ai_dashboard.routes import delete_connection as delete_connection_impl
+        resp = delete_connection_impl()
+        if isinstance(resp, tuple):
+            resp_obj = resp[0]
+        else:
+            resp_obj = resp
+        if hasattr(resp_obj, 'headers'):
+            resp_obj.headers["Deprecation"] = "true"
+            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections/:id>; rel="successor-version"'
+        return resp
+
+    # OpenAPI spec endpoint
+    @app.get("/openapi.json")
+    def openapi_spec():
+        """Serve OpenAPI 3.0 specification."""
+        return jsonify(app._get_openapi_spec())
 
     # Initialize migration support
     init_migrations(app, db)
