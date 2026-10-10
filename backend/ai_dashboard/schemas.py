@@ -63,3 +63,31 @@ class SelectConnectionRequest(BaseModel):
 class DeleteConnectionRequest(BaseModel):
     db_id: int = Field(..., description="Database connection ID to delete")
 
+
+class AIQueryRequest(BaseModel):
+    """Request for AI-powered SQL generation or data answers."""
+    query: str = Field(..., description="Natural language query", max_length=5000)
+    connection_id: int = Field(..., description="Database connection ID", alias="connection_id")
+    mode: str = Field("auto", pattern="^(auto|sql|answer)$", description="Mode: auto (agent), sql (direct LCEL), answer (data only)")
+
+    @field_validator('query')
+    @classmethod
+    def validate_query_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Query cannot be empty')
+        return v.strip()
+
+
+class AIQueryResponse(BaseModel):
+    """Response from AI query endpoint."""
+    success: bool = True
+    type: str = Field(..., description="Response type: query or answer")
+    sql: str | None = Field(None, description="Generated SQL query (when type=query)")
+    answer: str | None = Field(None, description="Natural language answer (when type=answer)")
+    rows: list[dict] | None = Field(None, description="Data rows (when type=answer)")
+    count: int | None = Field(None, description="Row count (when type=answer)")
+    tables: list[str] | None = Field(None, description="Table names referenced")
+    toolCalls: list[dict] | None = Field(None, description="Tool calls made by agent")
+    metadata: dict | None = Field(None, description="Additional metadata")
+    usage: dict | None = Field(None, description="LLM usage statistics")
+
