@@ -38,9 +38,13 @@ def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _issue_pair_response(user):
-    """Persist a refresh-token row and build the login/register payload."""
-    pair = issue_pair(user, current_app.secret_key)
+def _build_pair(user):
+    """Build a token pair without touching the DB (caller commits)."""
+    return issue_pair(user, current_app.secret_key)
+
+
+def _stage_pair(user, pair):
+    """Stage the refresh-token row; caller commits atomically with siblings."""
     db.session.add(
         RefreshToken(
             jti=pair["jti"],
@@ -48,6 +52,12 @@ def _issue_pair_response(user):
             expires_at=_utcnow() + timedelta(days=7),
         )
     )
+
+
+def _issue_pair_response(user):
+    """Persist a refresh-token row and build the login/register payload."""
+    pair = _build_pair(user)
+    _stage_pair(user, pair)
     db.session.commit()
     return jsonify(
         ValidateSuccessSchema(
@@ -100,7 +110,6 @@ def google_callback():
         if user:
             user.google_id = user_info["sub"]
             user.picture = user_info.get("picture") or user.picture
-            db.session.commit()
         else:
             user = User(
                 google_id=user_info["sub"],
@@ -109,16 +118,10 @@ def google_callback():
                 picture=user_info.get("picture"),
             )
             db.session.add(user)
-            db.session.commit()
-
-    pair = issue_pair(user, current_app.secret_key)
-    db.session.add(
-        RefreshToken(
-            jti=pair["jti"],
-            user_id=user.id,
-            expires_at=_utcnow() + timedelta(days=7),
-        )
-    )
+    # Single atomic commit: user row + refresh-token row together.
+    db.session.flush()
+    pair = _build_pair(user)
+    _stage_pair(user, pair)
     db.session.commit()
 
     frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173")
@@ -198,22 +201,36 @@ def register(body: RegisterRequest):
     hashed_password = generate_password_hash(body.password)
     new_user = User(email=body.email, password=hashed_password, name=body.name or "")
     db.session.add(new_user)
+    # Single atomic commit: user row + refresh-token row together.
+    db.session.flush()
+    pair = _build_pair(new_user)
+    _stage_pair(new_user, pair)
     db.session.commit()
 
-    return _issue_pair_response(new_user), 201
+    return (
+        jsonify(
+            ValidateSuccessSchema(
+                token=pair["token"],
+                refreshToken=pair["refreshToken"],
+                user=UserSchema(id=new_user.id, email=new_user.email, name=new_user.name),
+            ).model_dump()
+        ),
+        201,
+    )
 
 
 @auth_bp.post(
     "/forgot-password",
     tags=[auth_tag],
     summary="Generate OTP for password reset",
-    responses={200: SuccessMessageSchema, 400: ValidateErrorSchema, 404: ValidateErrorSchema},
+    responses={200: SuccessMessageSchema},
 )
 def forgot_password(body: ForgotPasswordRequest):
     """Step 1: generate OTP, store via env-driven backend, dispatch via Celery/print.
 
-    Always returns success to avoid account enumeration. An OTP is only
-    dispatched for existing password-based accounts.
+    Always returns success to avoid account enumeration AND activity probing:
+    requests inside the resend cooldown are silently dropped (no 429), so an
+    observer cannot distinguish unknown emails from recently-mailed ones.
     """
     uniform = (
         jsonify(
@@ -224,17 +241,8 @@ def forgot_password(body: ForgotPasswordRequest):
         200,
     )
 
-    remaining = _cooldown_remaining(body.email)
-    if remaining > 0:
-        return (
-            jsonify(
-                ValidateErrorSchema(
-                    error="Too Many Requests",
-                    message=f"Please wait {int(remaining)}s before requesting another OTP.",
-                ).model_dump()
-            ),
-            429,
-        )
+    if _cooldown_remaining(body.email) > 0:
+        return uniform
 
     user = User.query.filter_by(email=body.email).first()
     if not user:
@@ -252,21 +260,10 @@ def forgot_password(body: ForgotPasswordRequest):
     "/resend-otp",
     tags=[auth_tag],
     summary="Resend OTP with cooldown",
-    responses={200: SuccessMessageSchema, 429: ValidateErrorSchema},
+    responses={200: SuccessMessageSchema},
 )
 def resend_otp(body: ForgotPasswordRequest):
-    """Re-issue an OTP; rate-limited by OTP_RESEND_COOLDOWN_SECONDS."""
-    remaining = _cooldown_remaining(body.email)
-    if remaining > 0:
-        return (
-            jsonify(
-                ValidateErrorSchema(
-                    error="Too Many Requests",
-                    message=f"Please wait {int(remaining)}s before requesting another OTP.",
-                ).model_dump()
-            ),
-            429,
-        )
+    """Alias of forgot-password: same silent-cooldown uniform response."""
     return forgot_password(body)
 
 
@@ -460,9 +457,21 @@ def refresh(body: RefreshRequest):
             401,
         )
 
+    # Single atomic commit: revoke presented jti + persist rotated row.
     record.revoked = True
+    pair = _build_pair(user)
+    _stage_pair(user, pair)
     db.session.commit()
-    return _issue_pair_response(user), 200
+    return (
+        jsonify(
+            ValidateSuccessSchema(
+                token=pair["token"],
+                refreshToken=pair["refreshToken"],
+                user=UserSchema(id=user.id, email=user.email, name=user.name),
+            ).model_dump()
+        ),
+        200,
+    )
 
 
 @auth_bp.get("/me", tags=[auth_tag], summary="Current user")

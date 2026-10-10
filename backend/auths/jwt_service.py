@@ -57,4 +57,6 @@ def decode_refresh(token: str, secret: str) -> dict:
     payload = jwt.decode(token, secret, algorithms=["HS256"])
     if payload.get("typ") != "refresh" or not payload.get("jti"):
         raise jwt.InvalidTokenError("not a refresh token")
+    if not payload.get("user_id"):
+        raise jwt.InvalidTokenError("missing subject")
     return payload

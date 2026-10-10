@@ -132,13 +132,20 @@ def test_forgot_password_uniform_for_google_account(app_client):
     assert resp.get_json()["success"] is True
 
 
-def test_otp_resend_cooldown(app_client, auth_headers):
+def test_otp_resend_cooldown_is_silent(app_client, auth_headers):
+    """In-cooldown resends return uniform 200 WITHOUT dispatching a new OTP,
+    so observers cannot probe recent activity (no 429 signal)."""
+    from auths.otp_store import otp_store
+
     _, client = app_client
     _, email = auth_headers
-    first = client.post("/auth/forgot-password", json={"email": email})
-    assert first.status_code == 200
+    assert client.post("/auth/forgot-password", json={"email": email}).status_code == 200
+    first_otp, _, _ = otp_store.get(email)
+
     second = client.post("/auth/resend-otp", json={"email": email})
-    assert second.status_code == 429, second.get_data(as_text=True)
+    assert second.status_code == 200, second.get_data(as_text=True)
+    assert second.get_json()["success"] is True
+    assert otp_store.get(email)[0] == first_otp
 
 
 def test_otp_verify_reset_end_to_end(app_client, auth_headers):
