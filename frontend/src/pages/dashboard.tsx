@@ -4,6 +4,7 @@ import { logoutUser, getUser } from '../api/authapi'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
+import ApiStatus from '../components/ApiStatus'
 import type { ActiveConnection } from '../types/connection'
 
 function Dashboard() {
@@ -68,7 +69,9 @@ function Dashboard() {
 
       {/* Footer */}
       <footer style={styles.footer}>
-        <p style={{ margin: 0 }}> 2026 AI Dashboard. Powered by Flask & React</p>
+        <p style={{ margin: 0 }}>
+          <ApiStatus /> {' · '} 2026 AI Dashboard. Powered by Flask & React
+        </p>
       </footer>
     </div>
   )

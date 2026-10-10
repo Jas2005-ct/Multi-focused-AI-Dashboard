@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { registerUser, saveToken, saveUser } from '../api/authapi'
+import { googleLoginUrl } from '../config'
 import ErrorModal from '../components/ErrorModal'
 
 function Register() {
@@ -51,7 +52,7 @@ function Register() {
   }
 
   const handleGoogleRedirect = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL}/auth/login`
+    window.location.href = googleLoginUrl
   }
 
   return (

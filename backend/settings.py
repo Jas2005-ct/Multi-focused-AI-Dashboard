@@ -1,28 +1,32 @@
-import os
-import dotenv
+"""Deprecated compatibility shim (Phase 1).
 
-dotenv.load_dotenv()
+Canonical settings live in :mod:`config`. This module re-exports the names
+historically imported from here so unrelated code keeps working during the
+revamp. Removal: Phase 5 (all importers switch to ``config.get_settings()``).
+"""
 
-# Active LLM Provider ("OPEN_ZEN" / "OPENCODE_ZEN" or "OPENROUTER" / "OPEN_ROUTER")
-API_KEY_PROVIDER: str = os.getenv("API_KEY_PROVIDER", "OPEN_ZEN").strip().upper()
+import warnings
 
-# OpenRouter Configuration
-OPEN_ROUTER_API_KEY: str = os.getenv("OPEN_ROUTER_API_KEY", "")
-OPEN_ROUTER_MODEL: str = os.getenv("OPEN_ROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
-OPEN_ROUTER_BASE_URL: str = os.getenv("OPEN_ROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+warnings.warn(
+    "settings.py is deprecated; use config.get_settings() instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-# OpenCode Zen Configuration
-OPEN_ZEN_API_KEY: str = os.getenv("OPEN_ZEN_API_KEY") or os.getenv("OPENCODE_ZEN_API_KEY", "")
-OPEN_ZEN_MODEL: str = os.getenv("OPEN_ZEN_MODEL") or os.getenv("OPENCODE_ZEN_MODEL", "minimax-m3")
-OPEN_ZEN_BASE_URL: str = os.getenv("OPEN_ZEN_BASE_URL") or os.getenv("OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1")
+from config import get_settings as _get_settings
 
-# Database
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///app.db")
+_settings = _get_settings()
 
-# CORS allowed origins (comma‑separated)
-ALLOWED_ORIGINS: list[str] = [
-    origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
-]
+API_KEY_PROVIDER: str = _settings.API_KEY_PROVIDER
 
-# Rate limiting (requests per minute per IP)
-RATE_LIMIT_PER_MIN: int = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
+OPEN_ROUTER_API_KEY: str = _settings.OPEN_ROUTER_API_KEY
+OPEN_ROUTER_MODEL: str = _settings.OPEN_ROUTER_MODEL
+OPEN_ROUTER_BASE_URL: str = _settings.OPEN_ROUTER_BASE_URL
+
+OPEN_ZEN_API_KEY: str = _settings.OPEN_ZEN_API_KEY
+OPEN_ZEN_MODEL: str = _settings.OPEN_ZEN_MODEL
+OPEN_ZEN_BASE_URL: str = _settings.OPEN_ZEN_BASE_URL
+
+DATABASE_URL: str = _settings.DATABASE_URL
+ALLOWED_ORIGINS: list[str] = _settings.allowed_origin_list
+RATE_LIMIT_PER_MIN: int = _settings.RATE_LIMIT_PER_MIN
