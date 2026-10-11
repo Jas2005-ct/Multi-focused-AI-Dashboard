@@ -1,7 +1,8 @@
 """Connection model (Phase 3)."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from auths.models import db
@@ -12,9 +13,6 @@ class DBConnection(db.Model):
 
     __tablename__ = "db_connections"
     extend_existing = True
-    """Saved database connection owned by a user."""
-
-    __tablename__ = "db_connections"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -42,6 +40,26 @@ class DBConnection(db.Model):
 
     # Relationship
     owner = relationship("User", back_populates="db_connections")
+
+    # --- Compatibility helpers (legacy method-style API) ---
+    # Service functions in connections.service do the same; these exist so
+    # pre-Phase-3 callers (routes, tools, migration scripts) keep working.
+
+    def get_decrypted_password(self) -> str:
+        from connections.crypto import crypto
+
+        return crypto.decrypt(self.password) if self.password else ""
+
+    def get_decrypted_connection_string(self) -> str:
+        from connections.crypto import crypto
+
+        return crypto.decrypt(self.connection_string) if self.connection_string else ""
+
+    def set_encrypted_fields(self, password: str, connection_string: str) -> None:
+        from connections.crypto import crypto
+
+        self.password = crypto.encrypt(password) if password else None
+        self.connection_string = crypto.encrypt(connection_string) if connection_string else None
 
 
 # Ensure User model has the backref

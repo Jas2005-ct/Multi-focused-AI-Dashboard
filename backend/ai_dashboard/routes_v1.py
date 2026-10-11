@@ -336,10 +336,10 @@ def get_connections_v1(page: int = 1, per_page: int = 20):
             401: {"description": "Unauthorized"}
         })
 @require_auth
-def get_connection_detail_v1(path_db_id: int):
+def get_connection_detail_v1(db_id: int):
     """Get a specific connection by ID with table list."""
     from connections.service import get_connection_with_tables
-    result = get_connection_with_tables(g.user_id, path_db_id)
+    result = get_connection_with_tables(g.user_id, db_id)
     if not result:
         return error_response("Connection not found", status=404)
     return success_response({
@@ -366,10 +366,10 @@ def get_connection_detail_v1(path_db_id: int):
                401: {"description": "Unauthorized"}
            })
 @require_auth
-def delete_connection_v1(path_db_id: int):
+def delete_connection_v1(db_id: int):
     """Delete a saved database connection."""
     from connections.service import delete_connection
-    ok = delete_connection(g.user_id, path_db_id)
+    ok = delete_connection(g.user_id, db_id)
     if not ok:
         return error_response("Connection not found", status=404)
     return success_response(None, "Connection deleted successfully")
@@ -384,50 +384,50 @@ def delete_connection_v1(path_db_id: int):
              401: {"description": "Unauthorized"}
          })
 @require_auth
-def test_connection_v1(path_db_id: int):
+def test_connection_v1(db_id: int):
     """Test if a saved connection is valid."""
     from connections.service import test_connection
-    result = test_connection(g.user_id, path_db_id)
+    result = test_connection(g.user_id, db_id)
     if "Connection not found" in result.get("message", ""):
         return error_response(result["message"], status=404)
     return (success_response(result) if result["success"] else error_response(result["message"], status=500))
 
 
 @v1.get('/connections/<int:db_id>/tables',
-        tags=[conn_tags],
-        summary='Get tables for a connection',
-        responses={
-            200: {"description": "List of tables"},
-            404: {"description": "Connection not found"},
-            401: {"description": "Unauthorized"}
-        })
+         tags=[conn_tags],
+         summary='Get tables for a connection',
+         responses={
+             200: {"description": "List of tables"},
+             404: {"description": "Connection not found"},
+             401: {"description": "Unauthorized"}
+         })
 @require_auth
-def get_tables_v1(path_db_id: int):
+def get_tables_v1(db_id: int):
     """Get list of tables for a connection."""
     from connections.service import get_connection, get_tables
-    conn = get_connection(g.user_id, path_db_id)
+    conn = get_connection(g.user_id, db_id)
     if not conn:
         return error_response("Connection not found", status=404)
     conn_str = conn.get_decrypted_connection_string()
-    tables = get_tables(g.user_id, path_db_id, conn_str)
+    tables = get_tables(g.user_id, db_id, conn_str)
     return success_response({"tables": tables})
 
 
 @v1.get('/connections/<int:db_id>/tables/<table_name>',
-        tags=[conn_tags],
-        summary='Get schema for a specific table',
-        responses={
-            200: {"description": "Table schema"},
-            404: {"description": "Not found"},
-            401: {"description": "Unauthorized"}
-        })
+         tags=[conn_tags],
+         summary='Get schema for a specific table',
+         responses={
+             200: {"description": "Table schema"},
+             404: {"description": "Not found"},
+             401: {"description": "Unauthorized"}
+         })
 @require_auth
-def get_table_schema_v1(path_db_id: int, path_table_name: str):
+def get_table_schema_v1(db_id: int, table_name: str):
     """Get schema for a specific table."""
     from connections.service import get_connection, get_table_schema
-    conn = get_connection(g.user_id, path_db_id)
+    conn = get_connection(g.user_id, db_id)
     if not conn:
         return error_response("Connection not found", status=404)
     conn_str = conn.get_decrypted_connection_string()
-    schema = get_table_schema(g.user_id, path_db_id, conn_str, path_table_name)
+    schema = get_table_schema(g.user_id, db_id, conn_str, table_name)
     return success_response(schema)
