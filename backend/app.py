@@ -9,7 +9,6 @@ from auths.models import db
 from common.errors import register_error_handlers
 from common.request_id import register_request_id
 from config import get_settings
-from connections.routes import api as connections_api
 from extensions import init_cors, init_limiter, init_migrations, init_oauth
 from security.dec import require_auth
 
@@ -85,7 +84,6 @@ def create_app() -> OpenAPI:
     app.register_api(auth_bp, url_prefix="/auth")
     app.register_api(service_api, url_prefix="/api")
     app.register_api(service_api_v1)  # already has /api/v1 prefix
-    app.register_api(connections_api)  # already has /api/v1 prefix
 
     # Deprecation shims for old endpoints (Phase 5)
     # These keep old endpoints working but add deprecation headers
