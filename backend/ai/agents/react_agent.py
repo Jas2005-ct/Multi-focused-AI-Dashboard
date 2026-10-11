@@ -48,7 +48,7 @@ def _build_schema_context(user_id: int, db_id: int) -> str:
     try:
         from ai.tools.introspection import get_full_schema
         schema = get_full_schema.invoke({"user_id": user_id, "db_id": db_id})
-        from ai_dashboard.db_connections import format_schema_for_llm
+        from connections.service import format_schema_for_llm
         return format_schema_for_llm(schema)
     except Exception:
         return ""

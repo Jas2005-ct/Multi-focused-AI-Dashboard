@@ -14,6 +14,10 @@ from connections.service import (
     get_tables,
     get_full_schema,
     format_schema_for_llm,
+    save_connection,
+    test_connection,
+    delete_connection,
+    list_connections,
 )
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag

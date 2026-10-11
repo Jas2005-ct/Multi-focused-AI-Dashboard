@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import RunnableLambda
 
 from ai.llm_factory import get_llm
 from ai.guards import validate_sql_ast, add_safety_limits
@@ -49,13 +49,14 @@ def _safety_gate(sql: str) -> str:
     return add_safety_limits(sql)
 
 
-# LCEL chain: prompt -> model -> parser -> safety_gate
-sql_chain = (
-    sql_prompt
-    | get_llm(temperature=0, max_tokens=3000)
-    | StrOutputParser()
-    | RunnableLambda(_safety_gate)
-)
+def _get_sql_chain():
+    """Lazy initialization of the SQL chain to avoid module-level LLM initialization."""
+    return (
+        sql_prompt
+        | get_llm(temperature=0, max_tokens=3000)
+        | StrOutputParser()
+        | RunnableLambda(_safety_gate)
+    )
 
 
 def get_query_format(
@@ -72,6 +73,7 @@ def get_query_format(
         {"sql": str} on success, or {"error": ..., "error_type": ...}
     """
     try:
+        sql_chain = _get_sql_chain()
         sql = sql_chain.invoke({
             "sentence": sentence,
             "schema_context": schema_context or "",
@@ -100,3 +102,8 @@ def get_query_format(
         error_msg = f"API request failed: {e}"
         logger.exception(error_msg)
         return {"error": error_msg, "error_type": "api_error"}
+
+
+# Module-level exports for backward compatibility
+_validate_sql_safety = validate_sql_ast
+sql_chain = None  # Lazy-initialized on first use via _get_sql_chain()

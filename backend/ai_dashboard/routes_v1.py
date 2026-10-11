@@ -18,6 +18,13 @@ from connections.service import (
     get_tables,
     get_full_schema,
     format_schema_for_llm,
+    save_connection,
+    test_connection,
+    delete_connection,
+    list_connections,
+    get_connection,
+    get_connection_with_tables,
+    get_table_schema,
 )
 from security.dec import require_auth
 from flask_openapi3 import APIBlueprint, Tag
@@ -116,7 +123,6 @@ def ai_query_v1(body: AIQueryRequest):
                 if conn and conn.user_id == user_record.id:
                     try:
                         schema = get_full_schema(user_record.id, body.connection_id, conn.get_decrypted_connection_string())
-                        from ai_dashboard.db_connections import format_schema_for_llm
                         schema_context = format_schema_for_llm(schema)
                     except Exception as e:
                         logger.warning(f"Failed to fetch schema: {str(e)}")
@@ -201,7 +207,6 @@ def optimize_v1(body: PromptRequest):
                 if conn and conn.user_id == user_record.id:
                     try:
                         schema = get_full_schema(user_record.id, body.db_id, conn.get_decrypted_connection_string())
-                        from ai_dashboard.db_connections import format_schema_for_llm
                         schema_context = format_schema_for_llm(schema)
                     except Exception as e:
                         logger.warning(f"Failed to fetch schema: {str(e)}")

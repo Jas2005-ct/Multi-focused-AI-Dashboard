@@ -1,11 +1,12 @@
-"""LangChain chains for the AI dashboard."""
+"""Compatibility shim: re-export from ai package."""
 
-from ai_dashboard.chains.sql_chain import get_query_format, sql_chain
+from ai.agents.sql_chain import get_query_format, sql_chain
+from ai.agents.react_agent import run_agent_question
+
 from ai_dashboard.chains.introspection_chain import (
     get_introspection_router,
     get_routed_query_format,
 )
-from ai_dashboard.chains.agent_chain import run_agent_question
 
 __all__ = [
     "get_query_format",
