@@ -89,14 +89,19 @@ class ConnectionPoolManager:
         Get or create a connection pool engine for the user/database.
 
         On access: moves pool to MRU position, refreshes expiry.
-        On miss: creates new engine, evicts LRU if needed.
+        On miss: builds the engine *outside* the global lock (so concurrent
+        users are never blocked by another user's engine instantiation),
+        then installs it under a re-acquired lock with a double-check so two
+        threads missing simultaneously do not create duplicate engines.
+        Expired/evicted engines are always disposed outside the lock, since
+        release/Dialect connect can block and deadlock bystanders.
         """
-        engine_to_dispose = None
+        to_dispose: list[Engine] = []
+
+        # Pass 1 — lock covers only dictionary bookkeeping.
         with self._lock:
-            # Get or create user's pool dict
             user_pools = self._pools.setdefault(user_id, OrderedDict())
 
-            # Check if pool exists and is not expired
             if db_id in user_pools:
                 engine, expiry_time = user_pools[db_id]
                 if time.time() < expiry_time:
@@ -104,25 +109,40 @@ class ConnectionPoolManager:
                     user_pools[db_id] = (engine, time.time() + self.ttl)
                     user_pools.move_to_end(db_id)
                     return engine
-                else:
-                    # Expired: remove and dispose outside lock
-                    engine_to_dispose, _ = user_pools.pop(db_id)
-                    logger.info(f"Expired pool removed for user {user_id}, db {db_id}")
+                # Expired: remove now; disposal happens outside the lock
+                to_dispose.append(user_pools.pop(db_id)[0])
+                logger.info(f"Expired pool removed for user {user_id}, db {db_id}")
 
-            # Miss or expired: create new pool
             evicted = self._evict_lru_if_needed(user_id)
             if evicted:
-                engine_to_dispose = evicted
-            engine = self._make_engine(connection_string)
-            user_pools[db_id] = (engine, time.time() + self.ttl)
-            logger.info(f"Created connection pool for user {user_id}, db {db_id}")
+                to_dispose.append(evicted)
 
-        if engine_to_dispose:
+        # Pass 2 — expensive engine construction with no lock held.
+        engine = self._make_engine(connection_string)
+
+        # Pass 3 — install under the lock with a double-check.
+        with self._lock:
+            user_pools = self._pools.setdefault(user_id, OrderedDict())
+            existing = user_pools.get(db_id)
+            if existing is not None and time.time() < existing[1]:
+                # Another thread installed a fresh pool while we built ours:
+                # keep theirs, discard ours.
+                to_dispose.append(engine)
+                engine, expiry_time = existing
+            else:
+                if existing is not None:
+                    to_dispose.append(existing[0])
+                expiry_time = time.time() + self.ttl
+                user_pools[db_id] = (engine, expiry_time)
+            user_pools.move_to_end(db_id)
+
+        for stale in to_dispose:
             try:
-                engine_to_dispose.dispose()
+                stale.dispose()
             except Exception as e:
                 logger.warning(f"Error disposing engine: {e}")
 
+        logger.info(f"Created connection pool for user {user_id}, db {db_id}")
         return engine
 
     @contextmanager

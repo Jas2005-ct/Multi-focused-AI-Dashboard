@@ -1,6 +1,7 @@
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import { getToken, saveToken, saveUser } from '../api/authapi'
+import type { AuthUser } from '../types/auth'
 import type { ReactNode } from 'react'
 
 type Props = {
@@ -17,12 +18,21 @@ function ProtectedRoute({ children }: Props) {
     if (token) {
       saveToken(token)
       if (userParam) {
+        let user: AuthUser | null = null
         try {
-          const user = JSON.parse(decodeURIComponent(userParam))
-          saveUser(user)
+          // searchParams.get() already URL-decodes once, so parse raw first —
+          // a second decodeURIComponent throws "malformed URI" on names
+          // containing '%' and would silently drop the user (same as
+          // dashboard.tsx). Fallback covers older raw-encoded parameters.
+          user = JSON.parse(userParam) as AuthUser
         } catch {
-          // ignore invalid user data
+          try {
+            user = JSON.parse(decodeURIComponent(userParam)) as AuthUser
+          } catch {
+            // ignore invalid user data — 'user' stays null from the declaration
+          }
         }
+        if (user && user.email) saveUser(user)
       }
       // Remove token and user from URL without reloading
       setSearchParams({}, { replace: true })
