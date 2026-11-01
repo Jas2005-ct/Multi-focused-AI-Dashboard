@@ -181,52 +181,71 @@ def _run_sql_impl(args: RunSQLArgs) -> List[Dict[str, Any]]:
 
 # --- StructuredTool exports ---
 
-list_tables = StructuredTool.from_function(
-    func=_list_tables_impl,
-    name="list_tables",
-    description="List all tables in the database. Use when asked 'what tables exist?'.",
-    args_schema=ListTablesArgs,
-    return_direct=False,
+
+def _tool(model, impl, name: str, description: str) -> StructuredTool:
+    """Bridge StructuredTool's kwargs-style invocation into model-style impls.
+
+    ``StructuredTool.from_function`` calls the wrapped function with the
+    schema fields as kwargs; the ``_*_impl`` functions instead take one
+    typed pydantic model. Calling ``model(**kwargs)`` here keeps a single
+    validation point (so missing `user_id`/`db_id` surfaces as a clean
+    pydantic error) and avoids duplicating parameter lists between the
+    schema class and every function signature.
+    """
+
+    def _call(**kwargs):
+        return impl(model(**kwargs))
+
+    _call.__name__ = name
+    return StructuredTool.from_function(
+        func=_call,
+        name=name,
+        description=description,
+        args_schema=model,
+        return_direct=False,
+    )
+
+
+list_tables = _tool(
+    ListTablesArgs,
+    _list_tables_impl,
+    "list_tables",
+    "List all tables in the database. Use when asked 'what tables exist?'.",
 )
 
-describe_table = StructuredTool.from_function(
-    func=_describe_table_impl,
-    name="describe_table",
-    description="Describe columns of a specific table. Use for 'what columns does X table have?'.",
-    args_schema=DescribeTableArgs,
-    return_direct=False,
+describe_table = _tool(
+    DescribeTableArgs,
+    _describe_table_impl,
+    "describe_table",
+    "Describe columns of a specific table. Use for 'what columns does X table have?'.",
 )
 
-sample_rows = StructuredTool.from_function(
-    func=_sample_rows_impl,
-    name="sample_rows",
-    description="Return sample rows from a table. Use for 'show me the data in X table'.",
-    args_schema=SampleRowsArgs,
-    return_direct=False,
+sample_rows = _tool(
+    SampleRowsArgs,
+    _sample_rows_impl,
+    "sample_rows",
+    "Return sample rows from a table. Use for 'show me the data in X table'.",
 )
 
-count_rows = StructuredTool.from_function(
-    func=_count_rows_impl,
-    name="count_rows",
-    description="Count rows in a specific table. Use for 'how many rows in X table?'.",
-    args_schema=CountRowsArgs,
-    return_direct=False,
+count_rows = _tool(
+    CountRowsArgs,
+    _count_rows_impl,
+    "count_rows",
+    "Count rows in a specific table. Use for 'how many rows in X table?'.",
 )
 
-get_full_schema = StructuredTool.from_function(
-    func=_get_full_schema_impl,
-    name="get_full_schema",
-    description="Return full schema (all tables + columns). Use for 'describe the database'.",
-    args_schema=GetFullSchemaArgs,
-    return_direct=False,
+get_full_schema = _tool(
+    GetFullSchemaArgs,
+    _get_full_schema_impl,
+    "get_full_schema",
+    "Return full schema (all tables + columns). Use for 'describe the database'.",
 )
 
-run_sql_query = StructuredTool.from_function(
-    func=_run_sql_impl,
-    name="run_sql_query",
-    description="Run a read-only SQL SELECT/WITH query and return rows. Use for complex questions other tools can't answer.",
-    args_schema=RunSQLArgs,
-    return_direct=False,
+run_sql_query = _tool(
+    RunSQLArgs,
+    _run_sql_impl,
+    "run_sql_query",
+    "Run a read-only SQL SELECT/WITH query and return rows. Use for complex questions other tools can't answer.",
 )
 
 # All tools for the agent

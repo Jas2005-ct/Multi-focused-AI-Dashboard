@@ -31,7 +31,10 @@ def _needs_legacy_stamp(conn) -> bool:
     """True when workspace tables exist but no Alembic revision is recorded."""
     inspector = inspect(conn)
     tables = set(inspector.get_table_names())
-    if "alembic_version" in tables and conn.execute(text("SELECT 1 FROM alembic_version")).fetchall():
+    if (
+        "alembic_version" in tables
+        and conn.execute(text("SELECT 1 FROM alembic_version")).fetchall()
+    ):
         return False  # Revision recorded — normal migration-tracked database.
     # No version row (or no version table at all): legacy create_all() database?
     return bool(tables & _LEGACY_SCHEMA_TABLES)

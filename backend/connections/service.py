@@ -130,8 +130,8 @@ def save_connection(
     ).first()
 
     if existing:
-        # Update last_used and return
-        existing.last_used = datetime.now(timezone.utc)
+        # Update last_used and return (naive-UTC, matching stored column).
+        existing.last_used = datetime.now(timezone.utc).replace(tzinfo=None)
         db.session.commit()
         return existing
 

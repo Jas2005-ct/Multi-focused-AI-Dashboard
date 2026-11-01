@@ -236,7 +236,7 @@ def get_routed_query_format(
     schema_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     return router_chain.invoke(
-         {
+        {
             "sentence": sentence.sentence,
             "user_id": user_id,
             "db_id": db_id if db_id is not None else sentence.db_id,

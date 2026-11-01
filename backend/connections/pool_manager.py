@@ -55,14 +55,14 @@ class ConnectionPoolManager:
         elif db_url.startswith("mysql://"):
             db_url = db_url.replace("mysql://", "mysql+pymysql://", 1)
 
-        connect_args = {"connect_timeout": 5}
-
-        # PostgreSQL-specific SSL handling
+        # connect_args are dialect-specific: pysqlite rejects psycopg2/pymysql
+        # params with TypeError, so scope them per engine family.
         if db_url.startswith("postgresql+psycopg2://"):
-            # sslmode is already in query string from build_connection_string
-            pass
+            connect_args = {"connect_timeout": 5}
         elif db_url.startswith("mysql+pymysql://"):
-            connect_args["ssl"] = {"ssl_mode": "REQUIRED"}
+            connect_args = {"connect_timeout": 5, "ssl": {"ssl_mode": "REQUIRED"}}
+        else:
+            connect_args = {}
 
         return create_engine(
             db_url,
