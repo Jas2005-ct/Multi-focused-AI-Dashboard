@@ -83,10 +83,6 @@ def _cooldown_remaining(email):
     return max(0, OTP_RESEND_COOLDOWN_SECONDS - elapsed)
 
 
-auth_bp = APIBlueprint("auth", __name__)
-auth_tag = Tag(name="Auth", description="Authentication & OTP operations")
-logger = logging.getLogger(__name__)
-
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", None)
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", None)
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
