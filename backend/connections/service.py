@@ -183,7 +183,7 @@ def list_connections(user_id: int, page: int = 1, per_page: int = 20):
 
 def get_connection(user_id: int, db_id: int) -> Optional[DBConnection]:
     """Get a specific connection by ID, verifying ownership."""
-    conn = DBConnection.query.get(db_id)
+    conn = db.session.get(DBConnection, db_id)
     if not conn or conn.user_id != user_id:
         return None
     return conn
@@ -225,7 +225,8 @@ def test_connection(user_id: int, db_id: int) -> dict:
     conn_str = get_decrypted_connection_string(conn)
     result = connection_pool.test_connection(user_id, db_id, conn_str)
     if result["success"]:
-        conn.last_used = __import__("datetime").datetime.utcnow()
+        # Stored naive-UTC, matching the convention elsewhere in the codebase.
+        conn.last_used = datetime.now(timezone.utc).replace(tzinfo=None)
         db.session.commit()
     return result
 

@@ -110,9 +110,8 @@ def add_safety_limits(sql: str) -> str:
     # Add LIMIT if not present and it's a SELECT or WITH containing a SELECT
     if isinstance(parsed, exp.Select) and not parsed.args.get("limit"):
         parsed = parsed.limit(MAX_ROWS)
-    elif isinstance(parsed, exp.With):
-        if isinstance(parsed.this, exp.Select) and not parsed.this.args.get("limit"):
-            parsed.set("this", parsed.this.limit(MAX_ROWS))
+    elif isinstance(parsed, exp.With) and isinstance(parsed.this, exp.Select) and not parsed.this.args.get("limit"):
+        parsed.set("this", parsed.this.limit(MAX_ROWS))
 
     return parsed.sql(dialect="postgres")
 

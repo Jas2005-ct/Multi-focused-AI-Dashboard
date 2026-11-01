@@ -12,6 +12,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from ai.guards import sanitize_table_name
+from auths.models import db
 from connections.model import DBConnection
 from connections.service import (
     connection_pool,
@@ -33,7 +34,7 @@ _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _resolve_connection(user_id: int, db_id: int) -> DBConnection:
-    conn = DBConnection.query.get(db_id)
+    conn = db.session.get(DBConnection, db_id)
     if not conn:
         raise ValueError(f"Connection {db_id} not found")
     if conn.user_id != user_id:
