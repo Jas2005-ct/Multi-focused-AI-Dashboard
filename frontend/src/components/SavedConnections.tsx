@@ -59,6 +59,11 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
     }
   }, [page])
 
+  const refreshConnections = useCallback(async () => {
+    setLoading(true)
+    await loadConnections()
+  }, [loadConnections])
+
   // The effect only kicks off the fetch; the loading flag is raised by the
   // action that triggers it, so no state is set synchronously in the effect.
   // `set-state-in-effect` is disabled here on purpose: this is a plain
@@ -75,12 +80,7 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
     return () => {
       window.removeEventListener('connectionAdded', handleConnectionAdded)
     }
-  }, [loadConnections])
-
-  const refreshConnections = async () => {
-    setLoading(true)
-    await loadConnections()
-  }
+  }, [loadConnections, refreshConnections])
 
   const goToPage = (newPage: number) => {
     if (newPage >= 1 && newPage <= pages && newPage !== page) {

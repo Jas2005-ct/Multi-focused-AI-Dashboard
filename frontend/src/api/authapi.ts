@@ -10,9 +10,6 @@ export const loginUser = (data: LoginRequest) => API.post<AuthSuccess>('/auth/lo
 export const registerUser = (data: RegisterRequest) =>
   API.post<AuthSuccess>('/auth/register', data)
 
-export const refreshSession = (refreshToken: string) =>
-  API.post<AuthSuccess>('/auth/refresh', { refreshToken })
-
 export const forgotPassword = (email: string) =>
   API.post('/auth/forgot-password', { email })
 
@@ -36,10 +33,6 @@ export const getToken = () => {
 
 export const saveRefreshToken = (refreshToken: string) => {
   localStorage.setItem(REFRESH_KEY, refreshToken)
-}
-
-export const getRefreshToken = () => {
-  return localStorage.getItem(REFRESH_KEY)
 }
 
 /** Persist a full login/refresh pair (Phase 2 token rotation). */

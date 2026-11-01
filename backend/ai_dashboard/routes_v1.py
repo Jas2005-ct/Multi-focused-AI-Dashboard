@@ -1,14 +1,13 @@
 """API v1 routes — standardized contracts with OpenAPI docs (Phase 5)."""
 
-import json
 import logging
 
 from flask import g
 from flask_openapi3 import APIBlueprint, Tag
 from pydantic import BaseModel, Field
 
+from ai.agents.sql_chain import get_query_format as lcel_get_query_format
 from ai_dashboard.chains.introspection_chain import get_routed_query_format
-from ai_dashboard.chains.sql_chain import get_query_format as lcel_get_query_format
 from ai_dashboard.schemas import (
     AIQueryRequest,
     DBConnectionRequest,
@@ -51,19 +50,8 @@ class TablePath(BaseModel):
 
 # v1 blueprint with /api/v1 prefix
 v1 = APIBlueprint("services_v1", __name__, url_prefix="/api/v1", abp_security=[{"jwt": []}])
-sql_tags = Tag(name="SQL Query", description="SQL Query operations")
 conn_tags = Tag(name="Database Connections", description="Database Connection management")
 ai_tags = Tag(name="AI Assistant", description="AI-powered SQL generation and data answers")
-health_tags = Tag(name="Health", description="Service health and readiness")
-
-DEPRECATION_HEADER = "Warning: This endpoint is deprecated. Use /api/v1/ instead."
-
-
-def _add_deprecation(resp):
-    """Add deprecation header to response."""
-    resp.headers["Deprecation"] = "true"
-    resp.headers["Link"] = '<https://api.example.com/api/v1/>; rel="successor-version"'
-    return resp
 
 
 def _db_error_response(exc: Exception, status: int = 502):
@@ -75,55 +63,6 @@ def _db_error_response(exc: Exception, status: int = 502):
     """
     logger.warning("Target database error: %s", exc)
     return error_response("Database unreachable", str(exc), status)
-
-
-# ==================== Health ====================
-
-
-@v1.get(
-    "/health",
-    tags=[health_tags],
-    summary="Liveness probe",
-    responses={200: {"description": "Service healthy"}, 503: {"description": "Service unhealthy"}},
-)
-def health_v1():
-    """Liveness probe — can we reach the database?"""
-    from sqlalchemy import text
-
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return success_response({"status": "ok", "database": "connected"})
-    except Exception:
-        return error_response("Service unavailable", "Database connection failed", 503)
-
-
-@v1.get(
-    "/ready",
-    tags=[health_tags],
-    summary="Readiness probe",
-    responses={200: {"description": "Service ready"}, 503: {"description": "Service not ready"}},
-)
-def ready_v1():
-    """Readiness probe — deeper checks."""
-    checks = {"database": "connected" if _db_ok() else "error"}
-    ok = all(v == "connected" for v in checks.values())
-    return (
-        success_response({"status": "ready", "checks": checks})
-        if ok
-        else error_response("Not ready", "Service not ready", 503, details=checks)
-    )
-
-
-def _db_ok() -> bool:
-    try:
-        from sqlalchemy import text
-
-        with db.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
 
 
 # ==================== AI Query ====================
@@ -230,82 +169,6 @@ def ai_query_v1(body: AIQueryRequest):
 
     except Exception:
         logger.exception("AI query failed")
-        return error_response("Internal server error", status=500)
-
-
-# ==================== SQL Query (Legacy Shim) ====================
-
-
-@v1.post(
-    "/sql-query/",
-    tags=[sql_tags],
-    summary="Generate SQL query or answer (legacy shim)",
-    deprecated=True,
-    responses={
-        200: {"description": "Success - SQL query or metadata answer"},
-        400: {"description": "Bad request - invalid input"},
-        401: {"description": "Unauthorized"},
-        500: {"description": "Internal server error"},
-    },
-)
-@require_auth
-def optimize_v1(body: PromptRequest):
-    """Legacy endpoint — use POST /api/v1/ai/query instead.
-
-    Generates optimized SQL query or answers metadata via tools.
-    """
-    try:
-        schema_context = None
-        if body.db_id:
-            user_record = User.query.get(g.user_id)
-            if user_record:
-                conn = DBConnection.query.get(body.db_id)
-                if conn and conn.user_id == user_record.id:
-                    try:
-                        schema = get_full_schema(
-                            user_record.id, body.db_id, conn.get_decrypted_connection_string()
-                        )
-                        schema_context = format_schema_for_llm(schema)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch schema: {e!s}")
-
-        result = get_routed_query_format(
-            body, user_id=g.user_id, db_id=body.db_id, schema_context=schema_context
-        )
-
-        if "error" in result:
-            error_type = result.get("error_type")
-            status_code = (
-                500 if error_type == "api_error" else (401 if error_type == "auth_error" else 400)
-            )
-            return error_response(result["error"], status_code=status_code)
-
-        if result.get("type") == "answer":
-            return success_response(
-                {
-                    "type": "answer",
-                    "answer": result["answer"],
-                    "tables": result.get("tables", []),
-                    "count": result.get("count"),
-                    "rows": result.get("rows", []),
-                    "table": result.get("table"),
-                    "toolCalls": result.get("toolCalls", []),
-                    "output_query": None,
-                }
-            )
-
-        return success_response(
-            {
-                "type": "query",
-                "sql": result["output_query"],
-                "metadata": result.get("metadata", {}),
-            }
-        )
-
-    except json.JSONDecodeError as e:
-        return error_response(f"Invalid JSON format: {e!s}", status=400)
-    except Exception:
-        logger.exception("SQL query failed")
         return error_response("Internal server error", status=500)
 
 

@@ -57,12 +57,6 @@ export const testConnection = (dbId: number) =>
 export const deleteConnection = (dbId: number) =>
   API.delete(`/api/v1/connections/${dbId}`)
 
-export const getTables = (dbId: number) =>
-  API.get(`/api/v1/connections/${dbId}/tables`)
-
-export const getTableSchema = (dbId: number, tableName: string) =>
-  API.get(`/api/v1/connections/${dbId}/tables/${tableName}`)
-
 // Unauthenticated liveness probe for the status badge (Phase 1)
 export const apiStatus = () =>
   publicClient.get('/health')

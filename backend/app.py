@@ -1,8 +1,7 @@
-from flask import jsonify, request
+from flask import jsonify
 from flask_openapi3 import Info, OpenAPI
 from sqlalchemy import text
 
-from ai_dashboard.routes import api as service_api
 from ai_dashboard.routes_v1 import v1 as service_api_v1
 from auths.auth import auth_bp
 from auths.models import db
@@ -82,34 +81,7 @@ def create_app() -> OpenAPI:
 
     # Register blueprints / APIs
     app.register_api(auth_bp, url_prefix="/auth")
-    app.register_api(service_api, url_prefix="/api")
     app.register_api(service_api_v1)  # already has /api/v1 prefix
-
-    # Deprecation signalling for the legacy /api/* surface (Phase 5).
-    #
-    # These routes are served by the legacy blueprint in ai_dashboard/routes.py.
-    # Registering a second handler for the same path would be shadowed by it
-    # (Werkzeug dispatches to the first matching rule), so the headers are
-    # attached in an after_request hook instead — that always applies,
-    # whichever handler actually served the request.
-    legacy_successors = {
-        "/api/sql-query/": "/api/v1/ai/query",
-        "/api/ai/query": "/api/v1/ai/query",
-        "/api/db-connection": "/api/v1/connections",
-        "/api/get-connections/": "/api/v1/connections",
-        "/api/test-connection/": "/api/v1/connections/:id/test",
-        "/api/delete-connection": "/api/v1/connections/:id",
-    }
-
-    @app.after_request
-    def _add_deprecation_headers(response):
-        successor = legacy_successors.get(request.path)
-        if successor:
-            response.headers["Deprecation"] = "true"
-            response.headers["Link"] = (
-                f'<{request.host_url.rstrip("/")}{successor}>; rel="successor-version"'
-            )
-        return response
 
     # OpenAPI spec endpoint
     @app.get("/openapi.json")
