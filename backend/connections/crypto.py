@@ -24,6 +24,7 @@ def _derive_key(raw: str) -> bytes:
 @dataclass(frozen=True)
 class EncryptedPayload:
     """Versioned encrypted payload: v1|base64(ciphertext)."""
+
     version: int
     ciphertext: str
 
@@ -51,8 +52,14 @@ class ConnectionCrypto:
         self._load_keys()
 
     def _load_keys(self):
+        from config import get_settings
+
         # Primary key from ENCRYPTION_KEY (or SECRET_KEY fallback)
-        primary = os.getenv("ENCRYPTION_KEY") or os.getenv("SECRET_KEY") or ""
+        primary = (
+            os.getenv("ENCRYPTION_KEY")
+            or os.getenv("SECRET_KEY")
+            or get_settings().ensure_secret_key()
+        )
         if not primary:
             raise RuntimeError("ENCRYPTION_KEY or SECRET_KEY must be set for encryption")
         self._keys[1] = Fernet(_derive_key(primary))
@@ -92,6 +99,7 @@ class ConnectionCrypto:
 
 # Global singleton
 crypto = ConnectionCrypto()
+
 
 # Backward-compatible helpers
 def encrypt_value(plaintext: str) -> str:

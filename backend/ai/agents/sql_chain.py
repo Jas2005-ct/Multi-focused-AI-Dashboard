@@ -5,15 +5,15 @@ Keeps old chain as fallback for learning purposes.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 
+from ai.guards import add_safety_limits, validate_sql_ast
 from ai.llm_factory import get_llm
-from ai.guards import validate_sql_ast, add_safety_limits
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,12 @@ DATABASE SCHEMA CONTEXT (may be empty):
 
 SQL_USER_TEMPLATE = "Convert this request to a PostgreSQL query: {sentence}"
 
-sql_prompt = ChatPromptTemplate.from_messages([
-    ("system", SQL_SYSTEM_TEMPLATE),
-    ("human", SQL_USER_TEMPLATE),
-])
+sql_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", SQL_SYSTEM_TEMPLATE),
+        ("human", SQL_USER_TEMPLATE),
+    ]
+)
 
 
 def _safety_gate(sql: str) -> str:
@@ -60,24 +62,27 @@ def _get_sql_chain():
 
 
 def get_query_format(
-    sentence: str,
-    schema_context: Optional[str] = None,
-) -> Dict[str, Any]:
+    sentence: Any,
+    schema_context: str | None = None,
+) -> dict[str, Any]:
     """Convert natural language to SQL using LCEL chain.
 
     Args:
-        sentence: User input
+        sentence: User input (string or PromptRequest)
         schema_context: Optional database schema context
 
     Returns:
         {"sql": str} on success, or {"error": ..., "error_type": ...}
     """
     try:
+        raw_sentence = sentence.sentence if hasattr(sentence, "sentence") else str(sentence)
         sql_chain = _get_sql_chain()
-        sql = sql_chain.invoke({
-            "sentence": sentence,
-            "schema_context": schema_context or "",
-        })
+        sql = sql_chain.invoke(
+            {
+                "sentence": raw_sentence,
+                "schema_context": schema_context or "",
+            }
+        )
         return {"sql": sql}
 
     except OutputParserException as e:
@@ -104,6 +109,39 @@ def get_query_format(
         return {"error": error_msg, "error_type": "api_error"}
 
 
+class _LazySqlChain:
+    """Lazily-built LCEL chain.
+
+    The chain is composed on first use instead of at import time, because
+    building it requires a live LLM client (and its API key). Importing this
+    module must never fail just because no provider is configured yet.
+    """
+
+    def __init__(self):
+        self._chain = None
+
+    def _resolve(self):
+        if self._chain is None:
+            self._chain = _get_sql_chain()
+        return self._chain
+
+    def invoke(self, *args, **kwargs):
+        return self._resolve().invoke(*args, **kwargs)
+
+    async def ainvoke(self, *args, **kwargs):
+        return await self._resolve().ainvoke(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        return self._resolve().invoke(*args, **kwargs)
+
+    def __getattr__(self, item):
+        return getattr(self._resolve(), item)
+
+    def __repr__(self) -> str:
+        state = "built" if self._chain is not None else "lazy"
+        return f"<LazySqlChain ({state})>"
+
+
 # Module-level exports for backward compatibility
 _validate_sql_safety = validate_sql_ast
-sql_chain = None  # Lazy-initialized on first use via _get_sql_chain()
+sql_chain = _LazySqlChain()

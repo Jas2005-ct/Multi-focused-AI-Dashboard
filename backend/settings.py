@@ -7,13 +7,13 @@ revamp. Removal: Phase 5 (all importers switch to ``config.get_settings()``).
 
 import warnings
 
+from config import get_settings as _get_settings
+
 warnings.warn(
     "settings.py is deprecated; use config.get_settings() instead.",
     DeprecationWarning,
     stacklevel=2,
 )
-
-from config import get_settings as _get_settings
 
 _settings = _get_settings()
 

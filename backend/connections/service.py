@@ -3,16 +3,39 @@
 Business logic for DB connection CRUD, validation, and schema introspection.
 """
 
-from typing import List, Optional, Dict, Any
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from sqlalchemy import text
 
-from config import get_settings
-from connections.model import DBConnection
+from auths.models import db
 from connections.crypto import crypto
+from connections.model import DBConnection
 from connections.pool_manager import connection_pool
-from auths.models import User, db
+
+_SCHEMA_CACHE: Dict[Tuple[int, int], Tuple[float, Dict[str, Any]]] = {}
+_SCHEMA_CACHE_TTL = 300  # 5 minutes
+
+
+def get_cached_schema(user_id: int, db_id: int) -> Optional[Dict[str, Any]]:
+    entry = _SCHEMA_CACHE.get((user_id, db_id))
+    if not entry:
+        return None
+    expires_at, data = entry
+    if time.time() > expires_at:
+        _SCHEMA_CACHE.pop((user_id, db_id), None)
+        return None
+    return data
+
+
+def set_cached_schema(user_id: int, db_id: int, data: Dict[str, Any]) -> None:
+    _SCHEMA_CACHE[(user_id, db_id)] = (time.time() + _SCHEMA_CACHE_TTL, data)
+
+
+def invalidate_schema_cache(user_id: int, db_id: int) -> None:
+    _SCHEMA_CACHE.pop((user_id, db_id), None)
 
 
 def parse_connection_string(connection_string: str) -> dict:
@@ -27,7 +50,7 @@ def parse_connection_string(connection_string: str) -> dict:
             "password": parsed.password or "",
         }
     except Exception as e:
-        raise ValueError(f"Invalid connection string format: {e}")
+        raise ValueError(f"Invalid connection string format: {e}") from e
 
 
 def build_connection_string(
@@ -92,7 +115,9 @@ def save_connection(
         # Validate required fields
         if not all([host, port, database, username, password]):
             raise ValueError("All database fields required when connection_string not provided")
-        conn_str = build_connection_string(host, port, database, username, password, db_type)
+        conn_str = build_connection_string(
+            host, port, database, username, password, db_type, sslmode=sslmode
+        )
 
     # Check for existing
     existing = DBConnection.query.filter_by(
@@ -105,8 +130,8 @@ def save_connection(
     ).first()
 
     if existing:
-        # Update last_used and return
-        existing.last_used = __import__("datetime").datetime.utcnow()
+        # Update last_used and return (naive-UTC, matching stored column).
+        existing.last_used = datetime.now(timezone.utc).replace(tzinfo=None)
         db.session.commit()
         return existing
 
@@ -119,7 +144,7 @@ def save_connection(
         database=database,
         username=username,
         db_type=db_type,
-        sslmode="require" if db_type == "postgresql" else None,
+        sslmode=sslmode if db_type == "postgresql" else None,
     )
     set_encrypted_fields(new_conn, password, conn_str)
 
@@ -158,7 +183,7 @@ def list_connections(user_id: int, page: int = 1, per_page: int = 20):
 
 def get_connection(user_id: int, db_id: int) -> Optional[DBConnection]:
     """Get a specific connection by ID, verifying ownership."""
-    conn = DBConnection.query.get(db_id)
+    conn = db.session.get(DBConnection, db_id)
     if not conn or conn.user_id != user_id:
         return None
     return conn
@@ -200,7 +225,8 @@ def test_connection(user_id: int, db_id: int) -> dict:
     conn_str = get_decrypted_connection_string(conn)
     result = connection_pool.test_connection(user_id, db_id, conn_str)
     if result["success"]:
-        conn.last_used = __import__("datetime").datetime.utcnow()
+        # Stored naive-UTC, matching the convention elsewhere in the codebase.
+        conn.last_used = datetime.now(timezone.utc).replace(tzinfo=None)
         db.session.commit()
     return result
 
@@ -211,8 +237,9 @@ def delete_connection(user_id: int, db_id: int) -> bool:
     if not conn:
         return False
 
-    # Clean up pool
+    # Clean up pool and cache
     connection_pool.close_pool(user_id, db_id)
+    invalidate_schema_cache(user_id, db_id)
 
     db.session.delete(conn)
     db.session.commit()
@@ -265,38 +292,73 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
         """)
         result = conn.execute(query, {"table_name": table_name})
         columns = [
-            {"name": r[0], "type": r[1], "nullable": r[2] == "YES", "default": r[3]}
-            for r in result
+            {"name": r[0], "type": r[1], "nullable": r[2] == "YES", "default": r[3]} for r in result
         ]
     return {"table_name": table_name, "columns": columns}
 
 
 def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[str, Any]:
-    """Get full database schema with all tables and columns."""
-    tables = get_tables(user_id, db_id, connection_string)
-    full_schema = {"tables": []}
-    
-    for table in tables:
-        table_schema = get_table_schema(user_id, db_id, connection_string, table)
-        full_schema["tables"].append(table_schema)
-    
+    """Get full database schema with all tables and columns in a single batch query."""
+    cached = get_cached_schema(user_id, db_id)
+    if cached is not None:
+        return cached
+
+    with connection_pool.get_connection(user_id, db_id, connection_string) as conn:
+        if connection_string.startswith(("postgresql://", "postgres://")):
+            schema_filter = "table_schema = 'public'"
+        elif connection_string.startswith("mysql://"):
+            schema_filter = "table_schema = DATABASE()"
+        else:
+            schema_filter = "table_schema = 'public'"
+
+        query = text(f"""
+            SELECT table_name, column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE {schema_filter}
+            ORDER BY table_name, ordinal_position
+        """)
+        result = conn.execute(query)
+        tables_dict: Dict[str, List[Dict[str, Any]]] = {}
+        for row in result:
+            t_name, col_name, data_type, is_null, col_default = (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+            )
+            if t_name not in tables_dict:
+                tables_dict[t_name] = []
+            tables_dict[t_name].append(
+                {
+                    "name": col_name,
+                    "type": data_type,
+                    "nullable": is_null == "YES",
+                    "default": col_default,
+                }
+            )
+
+    full_schema = {
+        "tables": [{"table_name": t, "columns": cols} for t, cols in tables_dict.items()]
+    }
+    set_cached_schema(user_id, db_id, full_schema)
     return full_schema
 
 
 def format_schema_for_llm(schema: Dict[str, Any], max_chars: int = 4000) -> str:
     """
     Format database schema for inclusion in LLM prompt, capped to max_chars.
-    
+
     Args:
         schema: Schema dictionary
         max_chars: Hard cap to protect token budget (default 4000 chars ~1000 tokens)
-    
+
     Returns:
         Formatted string for LLM, truncated with notice if needed
     """
     if not schema or "tables" not in schema:
         return ""
-    
+
     lines = ["Database Schema:"]
     for table in schema["tables"]:
         table_name = table["table_name"]
@@ -304,5 +366,8 @@ def format_schema_for_llm(schema: Dict[str, Any], max_chars: int = 4000) -> str:
         lines.append(f"  - {table_name}: {columns}")
     result = "\n".join(lines)
     if len(result) > max_chars:
-        result = result[:max_chars] + f"\n  ... truncated {len(result)-max_chars} chars (showing {max_chars}/{len(result)})"
+        result = (
+            result[:max_chars]
+            + f"\n  ... truncated {len(result)-max_chars} chars (showing {max_chars}/{len(result)})"
+        )
     return result

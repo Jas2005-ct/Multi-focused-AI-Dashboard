@@ -72,22 +72,21 @@ def test_login_invalid_credentials(app_client, auth_headers):
     assert resp.status_code == 401
 
 
-# --- Auth gating on /api ---
+# --- Auth gating on /api/v1 ---
 
 
-def test_sql_query_requires_auth(app_client):
+def test_ai_query_requires_auth(app_client):
     _, client = app_client
-    # NOTE (baseline quirk): body validation runs before require_auth, so an
-    # explicitly-null db_id yields 422 even without a token. Omit db_id to
-    # isolate the auth gate.
-    resp = client.post("/api/sql-query/", json={"sentence": "list tables"})
+    # Valid body, no token: isolates the auth gate (validation precedes auth).
+    resp = client.post("/api/v1/ai/query", json={"query": "list tables", "connection_id": 1})
     assert resp.status_code == 401, resp.get_data(as_text=True)
+    assert resp.get_json()["code"] == "MISSING_TOKEN"
 
 
-def test_sql_query_invalid_body_without_auth_is_422(app_client):
+def test_ai_query_invalid_body_without_auth_is_422(app_client):
     """Locks current ordering: schema validation precedes the auth check."""
     _, client = app_client
-    resp = client.post("/api/sql-query/", json={"sentence": "list tables", "db_id": None})
+    resp = client.post("/api/v1/ai/query", json={"query": "list tables"})
     assert resp.status_code == 422, resp.get_data(as_text=True)
 
 
@@ -95,18 +94,20 @@ def test_get_connections_requires_auth(app_client):
     _, client = app_client
     # Phase 2: session fallback removed — every API route answers 401 JSON,
     # never a browser redirect (supersedes the Phase 0 302 lock-in).
-    plain = client.get("/api/get-connections/")
+    plain = client.get("/api/v1/connections")
     assert plain.status_code == 401, plain.get_data(as_text=True)
     assert plain.get_json()["code"] == "MISSING_TOKEN"
 
-    as_json = client.get("/api/get-connections/", headers={"Accept": "application/json"})
+    as_json = client.get("/api/v1/connections", headers={"Accept": "application/json"})
     assert as_json.status_code == 401, as_json.get_data(as_text=True)
 
 
-def test_sql_query_rejects_empty_sentence(app_client, auth_headers):
+def test_ai_query_rejects_empty_query(app_client, auth_headers):
     _, client = app_client
     headers, _ = auth_headers
-    resp = client.post("/api/sql-query/", json={"sentence": "   "}, headers=headers)
+    resp = client.post(
+        "/api/v1/ai/query", json={"query": "   ", "connection_id": 1}, headers=headers
+    )
     # flask-openapi3 surfaces Pydantic body errors as 422.
     assert resp.status_code == 422, resp.get_data(as_text=True)
 
@@ -129,7 +130,8 @@ def test_sql_query_rejects_empty_sentence(app_client, auth_headers):
     ],
 )
 def test_write_guard_snapshot(sentence, expected):
-    from ai_dashboard.write_guard import is_write_intent
+    # Phase 4 moved the canonical guard to ai.guards; the regex is identical.
+    from ai.guards import is_write_intent
 
     assert is_write_intent(sentence) is expected
 
@@ -145,7 +147,7 @@ def test_write_guard_snapshot(sentence, expected):
     ],
 )
 def test_sql_safety_allows_reads(query):
-    from ai_dashboard.chains.sql_chain import _validate_sql_safety
+    from ai.agents.sql_chain import _validate_sql_safety
 
     ok, _ = _validate_sql_safety(query)
     assert ok is True
@@ -163,7 +165,7 @@ def test_sql_safety_allows_reads(query):
     ],
 )
 def test_sql_safety_blocks_dangerous(query):
-    from ai_dashboard.chains.sql_chain import _validate_sql_safety
+    from ai.agents.sql_chain import _validate_sql_safety
 
     ok, _ = _validate_sql_safety(query)
     assert ok is False
@@ -192,7 +194,8 @@ def test_db_connection_request_validation():
 
 
 def test_crypto_roundtrip():
-    from security.crypto import decrypt_value, encrypt_value
+    # Phase 3 moved the canonical crypto to connections.crypto (versioned Fernet).
+    from connections.crypto import decrypt_value, encrypt_value
 
     token = encrypt_value("s3cr3t-password")
     assert token != "s3cr3t-password"
@@ -202,9 +205,9 @@ def test_crypto_roundtrip():
 def test_crypto_legacy_plaintext_fallback():
     """Current lenient behavior: undecryptable values pass through.
 
-    Locked here so Phase 3 (strict crypto) changes it deliberately.
+    Locked here so the strict-crypto change happens deliberately.
     """
-    from security.crypto import decrypt_value
+    from connections.crypto import decrypt_value
 
     assert decrypt_value("plaintext-legacy-value") == "plaintext-legacy-value"
 

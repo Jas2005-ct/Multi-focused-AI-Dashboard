@@ -16,11 +16,22 @@ publicClient.interceptors.request.use((config) => {
   return config
 })
 
-// SQL Query Optimization
-export const optimizeQuery = (sentence: string, dbId?: number) =>
-  API.post('/api/sql-query/', { sentence, db_id: dbId })
+// --- AI query (versioned surface) ---
 
-// Database Connection Management (Phase 3: /api/v1/connections)
+export type AiQueryMode = 'auto' | 'sql' | 'answer'
+
+export interface AiQueryRequest {
+  query: string
+  connection_id: number
+  mode?: AiQueryMode
+}
+
+/** AI query via the versioned endpoint (LangGraph agent or LCEL chain). */
+export const aiQuery = (payload: AiQueryRequest) =>
+  API.post('/api/v1/ai/query', payload)
+
+// --- Database connection management (versioned surface) ---
+
 export const getConnections = (page = 1, perPage = 20) =>
   API.get('/api/v1/connections', { params: { page, per_page: perPage } })
 
@@ -28,6 +39,7 @@ export const getConnection = (dbId: number) =>
   API.get(`/api/v1/connections/${dbId}`)
 
 export const saveDBConnection = (connectionData: {
+  name?: string
   host: string
   port: number
   database: string
@@ -35,7 +47,6 @@ export const saveDBConnection = (connectionData: {
   password: string
   db_type?: string
   connection_string?: string
-  name?: string
   sslmode?: string
 }) =>
   API.post('/api/v1/connections', connectionData)
@@ -45,16 +56,6 @@ export const testConnection = (dbId: number) =>
 
 export const deleteConnection = (dbId: number) =>
   API.delete(`/api/v1/connections/${dbId}`)
-
-export const getTables = (dbId: number) =>
-  API.get(`/api/v1/connections/${dbId}/tables`)
-
-export const getTableSchema = (dbId: number, tableName: string) =>
-  API.get(`/api/v1/connections/${dbId}/tables/${tableName}`)
-
-// Get API health check
-export const healthCheck = () =>
-  API.get('/api/')
 
 // Unauthenticated liveness probe for the status badge (Phase 1)
 export const apiStatus = () =>

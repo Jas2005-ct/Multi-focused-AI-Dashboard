@@ -6,13 +6,12 @@ Falls back to LCEL SQL chain if model lacks tool support.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 
-from ai.llm_factory import get_llm
 from ai.guards import is_write_intent
+from ai.llm_factory import get_llm
 from ai.tools.introspection import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -29,15 +28,15 @@ Database Schema:
 {schema_context}
 
 Instructions:
-- Always use exact table names from the schema above.
-- Map user terms to the closest matching table by meaning (e.g., user says "resume" or "cv" → use portfolio_resume, "skills" → portfolio_skills).
-- If unsure, prefer get_full_schema or list_tables first, then act.
+- Always use exact table names from the schema above or discovered via list_tables.
+- Map user terms to the closest matching table by meaning based on the provided schema.
+- If unsure, prefer list_tables or describe_table first, then act.
 
 Examples:
-User: "show my resume" → Call describe_table(table_name="portfolio_resume")
-User: "list all skills" → Call sample_rows(table_name="portfolio_skills", limit=20)
-User: "how many projects" → Call count_rows(table_name="portfolio_projects")
 User: "what tables exist" → Call list_tables()
+User: "how many users are there" → Call count_rows(table_name="users")
+User: "show recent orders" → Call sample_rows(table_name="orders", limit=10)
+User: "what columns are in products" → Call describe_table(table_name="products")
 """
 
 MAX_ITERATIONS = 6
@@ -47,8 +46,10 @@ def _build_schema_context(user_id: int, db_id: int) -> str:
     """Fetch and format full schema for LLM context."""
     try:
         from ai.tools.introspection import get_full_schema
+
         schema = get_full_schema.invoke({"user_id": user_id, "db_id": db_id})
         from connections.service import format_schema_for_llm
+
         return format_schema_for_llm(schema)
     except Exception:
         return ""
@@ -67,7 +68,9 @@ def run_agent_question(
     """
     # Block write operations — read-only mode
     if is_write_intent(sentence):
-        logger.warning(f"BLOCKED write intent sentence={sentence!r} user_id={user_id} db_id={db_id}")
+        logger.warning(
+            f"BLOCKED write intent sentence={sentence!r} user_id={user_id} db_id={db_id}"
+        )
         return {
             "type": "answer",
             "answer": "Write operation not permitted — this dashboard is read-only. INSERT/UPDATE/DELETE/CREATE/ALTER/DROP operations are blocked. Please use the Projects UI to create or modify data.",
@@ -81,7 +84,7 @@ def run_agent_question(
     # Use pre-fetched schema context from routes.py, fallback to fetching if empty
     if not schema_context:
         schema_context = _build_schema_context(user_id, db_id)
-    
+
     system_prompt = SYSTEM_PROMPT.format(schema_context=schema_context or "Unable to fetch schema")
 
     # Build tool map
@@ -108,8 +111,11 @@ def run_agent_question(
             tool_calls = getattr(ai_msg, "tool_calls", None)
             if not tool_calls:
                 # Model is done calling tools -> final natural-language answer
-                logger.info("AGENT ROUND %d — LLM returned final answer (%d chars), no tool calls",
-                            step, len(ai_msg.content or ""))
+                logger.info(
+                    "AGENT ROUND %d — LLM returned final answer (%d chars), no tool calls",
+                    step,
+                    len(ai_msg.content or ""),
+                )
                 return {
                     "type": "answer",
                     "answer": ai_msg.content or "",
@@ -120,26 +126,33 @@ def run_agent_question(
                     "table": None,
                 }
 
-            logger.info("AGENT ROUND %d — LLM requested %d tool call(s): %s",
-                        step, len(tool_calls),
-                        ", ".join(f"{tc['name']}({json.dumps(tc.get('args', {}))})" for tc in tool_calls))
+            logger.info(
+                "AGENT ROUND %d — LLM requested %d tool call(s): %s",
+                step,
+                len(tool_calls),
+                ", ".join(f"{tc['name']}({json.dumps(tc.get('args', {}))})" for tc in tool_calls),
+            )
 
             for tc in tool_calls:
                 fn = tool_map.get(tc["name"])
                 args = tc.get("args", {})
+                if isinstance(args, dict):
+                    args = dict(args)
+                    args["user_id"] = user_id
+                    args["db_id"] = db_id
                 try:
                     output = fn.invoke(args) if fn else f"Unknown tool: {tc['name']}"
                 except Exception as e:
                     output = f"Error: {e}"
                     logger.error("AGENT tool %s raised: %s", tc["name"], e)
-                trace.append({
-                    "name": tc["name"],
-                    "args": args,
-                    "result": output if not isinstance(output, str) else output[:500],
-                })
-                messages.append(
-                    ToolMessage(content=str(output), tool_call_id=tc["id"])
+                trace.append(
+                    {
+                        "name": tc["name"],
+                        "args": args,
+                        "result": output if not isinstance(output, str) else output[:500],
+                    }
                 )
+                messages.append(ToolMessage(content=str(output), tool_call_id=tc["id"]))
 
         # Exceeded max iterations
         logger.warning("AGENT exceeded max iterations")
@@ -159,9 +172,8 @@ def run_agent_question(
             f"falling back to LCEL SQL chain"
         )
         from ai.agents.sql_chain import get_query_format as lcel_get_query_format
-        from ai_dashboard.schemas import PromptRequest
 
-        res = lcel_get_query_format(PromptRequest(sentence=sentence, db_id=db_id))
+        res = lcel_get_query_format(sentence, schema_context=schema_context)
         if "sql" in res:
             res["type"] = "query"
         res["toolCalls"] = trace

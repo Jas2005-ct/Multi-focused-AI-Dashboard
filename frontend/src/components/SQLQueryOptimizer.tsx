@@ -1,24 +1,52 @@
 import { useState } from 'react'
-import { optimizeQuery } from '../api/dashboardapi'
+import { aiQuery } from '../api/dashboardapi'
+import { getErrorMessage, type ApiEnvelope } from '../api/types'
 import type { ActiveConnection } from '../types/connection'
+
+/** A single row returned by the agent's read-only tools. */
+type AnswerRow = Record<string, unknown>
+
+/** Payload carried in the `data` field of the v1 AI query envelope. */
+interface AiQueryData {
+  type: 'query' | 'answer'
+  sql?: string
+  answer?: string
+  tables?: string[]
+  rows?: AnswerRow[]
+  count?: number | null
+  toolCalls?: { name: string; args: Record<string, unknown> }[]
+}
 
 function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
   const [sentence, setSentence] = useState('')
   const [optimizedQuery, setOptimizedQuery] = useState('')
   const [answer, setAnswer] = useState('')
   const [answerTables, setAnswerTables] = useState<string[]>([])
-  const [answerRows, setAnswerRows] = useState<Record<string, any>[]>([])
+  const [answerRows, setAnswerRows] = useState<AnswerRow[]>([])
   const [answerCount, setAnswerCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  const resetResults = () => {
+    setOptimizedQuery('')
+    setAnswer('')
+    setAnswerTables([])
+    setAnswerRows([])
+    setAnswerCount(null)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!sentence.trim()) {
       setError('Please enter a natural language sentence')
+      return
+    }
+
+    if (!activeConnection?.id) {
+      setError('Select a database connection first')
       return
     }
 
@@ -26,39 +54,38 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
       setLoading(true)
       setError('')
       setSuccess(false)
-      
-      const response = await optimizeQuery(sentence, activeConnection?.id)
-      
-      if (response.data.success === false) {
-        setError(response.data.error || 'Failed to optimize query')
-        setOptimizedQuery('')
-        setAnswer('')
-        setAnswerTables([])
-        setAnswerRows([])
-        setAnswerCount(null)
-      } else if (response.data.type === 'answer') {
-        setAnswer(response.data.answer || '')
-        setAnswerTables(response.data.tables || [])
-        setAnswerRows(response.data.rows || [])
-        setAnswerCount(response.data.count ?? null)
-        setOptimizedQuery('')
-        setSuccess(true)
-      } else {
-        setOptimizedQuery(response.data.output_query)
-        setAnswer('')
-        setAnswerTables([])
-        setAnswerRows([])
-        setAnswerCount(null)
-        setSuccess(true)
+
+      const response = await aiQuery({
+        query: sentence.trim(),
+        connection_id: activeConnection.id,
+        mode: 'auto',
+      })
+      const body = response.data as ApiEnvelope<AiQueryData>
+      const data = body.data
+
+      if (!data) {
+        setError(body.message || 'Failed to optimize query')
+        resetResults()
+        return
       }
-    } catch (err: any) {
-      const errorMsg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to optimize query'
-      setError(errorMsg)
-      setOptimizedQuery('')
-      setAnswer('')
-      setAnswerTables([])
-      setAnswerRows([])
-      setAnswerCount(null)
+
+      if (data.type === 'answer') {
+        setAnswer(data.answer || '')
+        setAnswerTables(data.tables || [])
+        setAnswerRows(data.rows || [])
+        setAnswerCount(data.count ?? null)
+        setOptimizedQuery('')
+      } else {
+        setOptimizedQuery(data.sql || '')
+        setAnswer('')
+        setAnswerTables([])
+        setAnswerRows([])
+        setAnswerCount(null)
+      }
+      setSuccess(true)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to optimize query'))
+      resetResults()
     } finally {
       setLoading(false)
     }
@@ -76,11 +103,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
 
   const handleClear = () => {
     setSentence('')
-    setOptimizedQuery('')
-    setAnswer('')
-    setAnswerTables([])
-    setAnswerRows([])
-    setAnswerCount(null)
+    resetResults()
     setError('')
     setSuccess(false)
   }
@@ -235,7 +258,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
                     <tbody>
                       {answerRows.map((row, idx) => (
                         <tr key={idx}>
-                          {Object.values(row).map((v: any, i) => (
+                          {Object.values(row).map((v: unknown, i) => (
                             <td key={i} style={styles.td}>{String(v ?? '')}</td>
                           ))}
                         </tr>

@@ -4,8 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
-from langchain_core.runnables import RunnableConfig
 
 from config import get_settings
 
@@ -27,14 +27,22 @@ _REGISTRY: dict[str, ProviderConfig] = {
         env_prefix="OPEN_ZEN",
         fallback_prefix="OPENCODE_ZEN",
         aliases={"OPEN_ZEN", "OPENCODE_ZEN", "OPENCODE", "ZEN"},
-        defaults=(get_settings().OPEN_ZEN_API_KEY, get_settings().OPEN_ZEN_MODEL, get_settings().OPEN_ZEN_BASE_URL),
+        defaults=(
+            get_settings().OPEN_ZEN_API_KEY,
+            get_settings().OPEN_ZEN_MODEL,
+            get_settings().OPEN_ZEN_BASE_URL,
+        ),
     ),
     "openrouter": ProviderConfig(
         name="OpenRouter",
         env_prefix="OPEN_ROUTER",
         fallback_prefix=None,
         aliases={"OPENROUTER", "OPEN_ROUTER", "ROUTER"},
-        defaults=(get_settings().OPEN_ROUTER_API_KEY, get_settings().OPEN_ROUTER_MODEL, get_settings().OPEN_ROUTER_BASE_URL),
+        defaults=(
+            get_settings().OPEN_ROUTER_API_KEY,
+            get_settings().OPEN_ROUTER_MODEL,
+            get_settings().OPEN_ROUTER_BASE_URL,
+        ),
     ),
 }
 
@@ -55,9 +63,7 @@ def _resolve_env(prefix: str, fallback_prefix: Optional[str], suffix: str, defau
 
 
 def get_provider_config(provider: Optional[str] = None) -> Tuple[str, str, str, str]:
-    active_provider = (
-        provider or get_settings().API_KEY_PROVIDER or "OPEN_ZEN"
-    ).strip().upper()
+    active_provider = (provider or get_settings().API_KEY_PROVIDER or "OPEN_ZEN").strip().upper()
 
     key = _ALIAS_TO_KEY.get(active_provider)
     if key is None:
@@ -103,6 +109,27 @@ class LLMUsageTracker:
 usage_tracker = LLMUsageTracker()
 
 
+class UsageTrackingCallback(BaseCallbackHandler):
+    """LangChain callback that records token usage for cost monitoring.
+
+    Must be a BaseCallbackHandler subclass: LangChain validates the
+    ``callbacks`` argument and rejects plain functions.
+    """
+
+    def __init__(self, tracker: LLMUsageTracker = None):  # noqa: ANN001 - optional
+        super().__init__()
+        self._tracker = tracker or usage_tracker
+
+    def on_llm_end(self, response, **kwargs) -> None:  # noqa: ANN001 - langchain signature
+        """Record token counts once a model response completes."""
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            self._tracker.add_usage(
+                usage.get("input_tokens", 0) or 0,
+                usage.get("output_tokens", 0) or 0,
+            )
+
+
 def get_llm(
     model: Optional[str] = None,
     temperature: float = 0.0,
@@ -125,14 +152,9 @@ def get_llm(
         f"Initializing LLM: provider='{provider_name}', model='{resolved_model}', base_url='{base_url}'"
     )
 
-    # Custom callback to track usage
-    def track_usage(response):
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            usage_tracker.add_usage(
-                response.usage_metadata.get('input_tokens', 0),
-                response.usage_metadata.get('output_tokens', 0),
-            )
-
+    # Usage tracking callback. LangChain requires a BaseCallbackHandler
+    # instance here - passing a plain function raises a Pydantic
+    # ValidationError and breaks every model call.
     return ChatOpenAI(
         model=resolved_model,
         base_url=base_url,
@@ -141,5 +163,5 @@ def get_llm(
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
-        callbacks=[track_usage],
+        callbacks=[UsageTrackingCallback()],
     )

@@ -6,7 +6,6 @@ Run this during Phase 7 rollout to force all users to re-authenticate with new J
 """
 
 import os
-import sys
 
 # Must set env BEFORE any imports that use crypto
 os.environ.setdefault("FLASK_ENV", "production")
@@ -19,23 +18,23 @@ os.environ.pop("CELERY_BROKER_URL", None)
 
 # Now import after env is set
 from app import create_app
-from auths.models import db, RefreshToken
+from auths.models import RefreshToken, db
 
 
 def invalidate_refresh_tokens():
     """Mark all refresh tokens as revoked to force re-login."""
     app = create_app()
-    
+
     with app.app_context():
         # Ensure tables exist
         db.create_all()
-        
+
         tokens = RefreshToken.query.filter_by(revoked=False).all()
         print(f"Found {len(tokens)} active refresh tokens to revoke")
-        
+
         for token in tokens:
             token.revoked = True
-        
+
         db.session.commit()
         print(f"Revoked {len(tokens)} refresh tokens. All users must re-login.")
 

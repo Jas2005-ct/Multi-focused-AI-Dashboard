@@ -1,11 +1,13 @@
 """Connection schemas (Phase 3)."""
 
+from typing import List, Optional
+
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
 
 
 class ConnectionCreate(BaseModel):
     """Request to create a new connection."""
+
     name: Optional[str] = Field(None, max_length=100)
     host: str = Field("localhost", max_length=255)
     port: int = Field(5432, ge=1, le=65535)
@@ -14,7 +16,9 @@ class ConnectionCreate(BaseModel):
     password: str = Field(..., min_length=1)
     db_type: str = Field("postgresql", pattern="^(postgresql|mysql)$")
     connection_string: Optional[str] = None
-    sslmode: Optional[str] = Field("require", pattern="^(require|disable|allow|prefer|verify-ca|verify-full)$")
+    sslmode: Optional[str] = Field(
+        "require", pattern="^(require|disable|allow|prefer|verify-ca|verify-full)$"
+    )
 
     @field_validator("db_type")
     @classmethod
@@ -24,17 +28,21 @@ class ConnectionCreate(BaseModel):
 
 class ConnectionUpdate(BaseModel):
     """Request to update a connection (partial)."""
+
     name: Optional[str] = Field(None, max_length=100)
     host: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
     database: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
-    sslmode: Optional[str] = Field(None, pattern="^(require|disable|allow|prefer|verify-ca|verify-full)$")
+    sslmode: Optional[str] = Field(
+        None, pattern="^(require|disable|allow|prefer|verify-ca|verify-full)$"
+    )
 
 
 class ConnectionResponse(BaseModel):
     """Connection response (no secrets)."""
+
     id: int
     name: Optional[str]
     host: str
@@ -49,6 +57,7 @@ class ConnectionResponse(BaseModel):
 
 class ConnectionDetailResponse(ConnectionResponse):
     """Connection with table list."""
+
     tables: List[str] = []
 
 
