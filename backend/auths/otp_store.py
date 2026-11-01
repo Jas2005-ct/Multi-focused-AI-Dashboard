@@ -1,8 +1,8 @@
+import logging
 import os
-import time
 import secrets
 import threading
-import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
@@ -18,6 +18,7 @@ class OTPStore(ABC):
     @abstractmethod
     def get(self, email: str) -> Optional[Tuple[str, float, int]]:
         """Returns (otp, expiry_timestamp, attempts) or None"""
+
     @abstractmethod
     def delete(self, email: str) -> None: ...
     @abstractmethod
@@ -138,6 +139,7 @@ def get_otp_store() -> OTPStore:
     if redis_url and not backend:
         try:
             import redis  # noqa
+
             store = RedisOTPStore(redis_url)
             store.r.ping()
             logger.info(f"OTP store: auto Redis ({redis_url.split('@')[-1]})")

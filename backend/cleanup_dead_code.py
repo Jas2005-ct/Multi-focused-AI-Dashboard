@@ -6,12 +6,9 @@ Run this after Phase 7 migration to clean up deprecated code.
 """
 
 import os
-import sys
 
 # Ensure we load env before importing app
 os.environ.setdefault("FLASK_ENV", "production")
-
-from app import create_app
 
 
 def cleanup_dead_code():

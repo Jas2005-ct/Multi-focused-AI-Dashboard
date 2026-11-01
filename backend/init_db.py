@@ -5,17 +5,20 @@ Run this to create all tables and initialize the database with your models
 """
 
 import os
+
 from dotenv import load_dotenv
+
 from app import create_app
 from auths.models import db
 
 # Load environment variables
 load_dotenv()
 
+
 def init_database():
     """Initialize the database with all models"""
     app = create_app()
-    
+
     with app.app_context():
         print("Creating all tables...")
         db.create_all()
@@ -24,6 +27,8 @@ def init_database():
         print("\nTables created:")
         print("  - users")
         print("  - db_connections")
+        print("  - refresh_tokens")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     init_database()

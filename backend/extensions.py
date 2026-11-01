@@ -33,23 +33,26 @@ def init_limiter(app: Any, settings: Any) -> Any | None:
         from flask_limiter import Limiter
         from flask_limiter.util import get_remote_address
 
-        return Limiter(
-            app=app,
-            key_func=get_remote_address,
-            default_limits=[f"{settings.RATE_LIMIT_PER_MIN}/minute"],
-        )
+        kwargs: dict[str, Any] = {
+            "app": app,
+            "key_func": get_remote_address,
+            "default_limits": [f"{settings.RATE_LIMIT_PER_MIN}/minute"],
+        }
+        if settings.REDIS_URL:
+            kwargs["storage_uri"] = settings.REDIS_URL
+        return Limiter(**kwargs)
     except ImportError:
         logger.warning("flask-limiter not installed; rate limiting disabled")
         return None
 
 
 def init_oauth(app: Any, settings: Any) -> Any:
-    """Attach Authlib OAuth; registers Google only when configured."""
+    """Attach Authlib OAuth; registers Google only when enabled + configured."""
     from authlib.integrations.flask_client import OAuth
 
     oauth = OAuth()
     app.oauth = oauth
-    if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+    if settings.google_oauth_enabled:
         oauth.register(
             name="google",
             client_id=settings.GOOGLE_CLIENT_ID,
@@ -58,7 +61,12 @@ def init_oauth(app: Any, settings: Any) -> Any:
             client_kwargs={"scope": "openid email profile"},
         )
     else:
-        logger.info("GOOGLE_CLIENT_ID/SECRET not set; Google OAuth disabled")
+        logger.info(
+            "Google OAuth disabled (ENABLE_GOOGLE_OAUTH=%s, client_id set=%s); "
+            "the /auth/login and /auth/callback routes answer 503",
+            settings.ENABLE_GOOGLE_OAUTH,
+            bool(settings.GOOGLE_CLIENT_ID),
+        )
     return oauth
 
 

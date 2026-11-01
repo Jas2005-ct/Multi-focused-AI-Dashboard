@@ -1,4 +1,4 @@
-from flask import jsonify
+from flask import jsonify, request
 from flask_openapi3 import Info, OpenAPI
 from sqlalchemy import text
 
@@ -10,7 +10,6 @@ from common.errors import register_error_handlers
 from common.request_id import register_request_id
 from config import get_settings
 from extensions import init_cors, init_limiter, init_migrations, init_oauth
-from security.dec import require_auth
 
 
 def create_app() -> OpenAPI:
@@ -40,8 +39,9 @@ def create_app() -> OpenAPI:
     # Initialize database
     db.init_app(app)
 
-    # Initialize OAuth (Google only when client id/secret configured)
+    # Initialize OAuth (Google only when enabled + configured)
     init_oauth(app, settings)
+    app.config["GOOGLE_OAUTH_ENABLED"] = settings.google_oauth_enabled
 
     def _db_ok() -> bool:
         try:
@@ -85,75 +85,31 @@ def create_app() -> OpenAPI:
     app.register_api(service_api, url_prefix="/api")
     app.register_api(service_api_v1)  # already has /api/v1 prefix
 
-    # Deprecation shims for old endpoints (Phase 5)
-    # These keep old endpoints working but add deprecation headers
-    @app.route("/api/sql-query/", methods=["POST"])
-    @require_auth
-    def _deprecated_sql_query():
-        from ai_dashboard.routes import optimize as optimize_impl
-        resp = optimize_impl()
-        resp = resp if isinstance(resp, tuple) else (resp, 200)
-        resp_obj = resp[0] if isinstance(resp, tuple) else resp
-        if hasattr(resp_obj, 'headers'):
-            resp_obj.headers["Deprecation"] = "true"
-            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/ai/query>; rel="successor-version"'
-        return resp
+    # Deprecation signalling for the legacy /api/* surface (Phase 5).
+    #
+    # These routes are served by the legacy blueprint in ai_dashboard/routes.py.
+    # Registering a second handler for the same path would be shadowed by it
+    # (Werkzeug dispatches to the first matching rule), so the headers are
+    # attached in an after_request hook instead — that always applies,
+    # whichever handler actually served the request.
+    legacy_successors = {
+        "/api/sql-query/": "/api/v1/ai/query",
+        "/api/ai/query": "/api/v1/ai/query",
+        "/api/db-connection": "/api/v1/connections",
+        "/api/get-connections/": "/api/v1/connections",
+        "/api/test-connection/": "/api/v1/connections/:id/test",
+        "/api/delete-connection": "/api/v1/connections/:id",
+    }
 
-    @app.route("/api/db-connection", methods=["POST"])
-    @require_auth
-    def _deprecated_db_connection():
-        from ai_dashboard.routes import db_connection as db_connection_impl
-        resp = db_connection_impl()
-        if isinstance(resp, tuple):
-            resp_obj = resp[0]
-        else:
-            resp_obj = resp
-        if hasattr(resp_obj, 'headers'):
-            resp_obj.headers["Deprecation"] = "true"
-            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections>; rel="successor-version"'
-        return resp
-
-    @app.route("/api/get-connections/", methods=["GET"])
-    @require_auth
-    def _deprecated_get_connections():
-        from ai_dashboard.routes import get_connections as get_connections_impl
-        resp = get_connections_impl()
-        if isinstance(resp, tuple):
-            resp_obj = resp[0]
-        else:
-            resp_obj = resp
-        if hasattr(resp_obj, 'headers'):
-            resp_obj.headers["Deprecation"] = "true"
-            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections>; rel="successor-version"'
-        return resp
-
-    @app.route("/api/test-connection/", methods=["POST"])
-    @require_auth
-    def _deprecated_test_connection():
-        from ai_dashboard.routes import test_connection as test_connection_impl
-        resp = test_connection_impl()
-        if isinstance(resp, tuple):
-            resp_obj = resp[0]
-        else:
-            resp_obj = resp
-        if hasattr(resp_obj, 'headers'):
-            resp_obj.headers["Deprecation"] = "true"
-            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections/:id/test>; rel="successor-version"'
-        return resp
-
-    @app.route("/api/delete-connection", methods=["DELETE"])
-    @require_auth
-    def _deprecated_delete_connection():
-        from ai_dashboard.routes import delete_connection as delete_connection_impl
-        resp = delete_connection_impl()
-        if isinstance(resp, tuple):
-            resp_obj = resp[0]
-        else:
-            resp_obj = resp
-        if hasattr(resp_obj, 'headers'):
-            resp_obj.headers["Deprecation"] = "true"
-            resp_obj.headers["Link"] = '<https://api.example.com/api/v1/connections/:id>; rel="successor-version"'
-        return resp
+    @app.after_request
+    def _add_deprecation_headers(response):
+        successor = legacy_successors.get(request.path)
+        if successor:
+            response.headers["Deprecation"] = "true"
+            response.headers["Link"] = (
+                f'<{request.host_url.rstrip("/")}{successor}>; rel="successor-version"'
+            )
+        return response
 
     # OpenAPI spec endpoint
     @app.get("/openapi.json")

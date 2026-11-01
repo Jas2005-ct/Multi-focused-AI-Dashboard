@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { getConnections, deleteConnection, testConnection } from '../api/dashboardapi'
-import API from '../api/dashboardapi'
+import { useCallback, useEffect, useState } from 'react'
+import { getConnections, deleteConnection, testConnection, getConnection } from '../api/dashboardapi'
+import { getErrorMessage, type ApiEnvelope } from '../api/types'
 
 interface Connection {
   id: number
@@ -15,6 +15,14 @@ interface Connection {
   last_used?: string
 }
 
+interface ConnectionDetail {
+  id: number
+  host: string
+  database: string
+  username: string
+  tables: string[]
+}
+
 import type { ActiveConnection } from '../types/connection'
 
 function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connection: ActiveConnection | null) => void }) {
@@ -27,56 +35,89 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(0)
 
-  useEffect(() => {
-    loadConnections()
-  }, [page])
-
-  const loadConnections = async () => {
+  const loadConnections = useCallback(async () => {
     try {
-      setLoading(true)
       const response = await getConnections(page, 20)
-      // New paginated response format
-      if (response.data.data && response.data.data.connections) {
-        setConnections(response.data.data.connections)
-        setTotal(response.data.data.total)
-        setPages(response.data.data.pages)
-      } else if (response.data.success && response.data.connections) {
-        // Fallback for old format
-        setConnections(response.data.connections)
+      const body = response.data as ApiEnvelope<{
+        page: number
+        per_page: number
+        total: number
+        pages: number
+        connections: Connection[]
+      }>
+      if (body.data?.connections) {
+        setConnections(body.data.connections)
+        setTotal(body.data.total)
+        setPages(body.data.pages)
       } else {
-        setMessage(response.data.message || 'Failed to load connections')
+        setMessage(body.message || 'Failed to load connections')
       }
-    } catch (err: any) {
-      setMessage(err?.response?.data?.message || 'Failed to load connections')
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, 'Failed to load connections'))
     } finally {
       setLoading(false)
+    }
+  }, [page])
+
+  // The effect only kicks off the fetch; the loading flag is raised by the
+  // action that triggers it, so no state is set synchronously in the effect.
+  // `set-state-in-effect` is disabled here on purpose: this is a plain
+  // fetch-on-mount list with no data-fetching library in the stack, and the
+  // state updates all happen after the request resolves.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadConnections()
+
+    const handleConnectionAdded = () => {
+      void refreshConnections()
+    }
+    window.addEventListener('connectionAdded', handleConnectionAdded)
+    return () => {
+      window.removeEventListener('connectionAdded', handleConnectionAdded)
+    }
+  }, [loadConnections])
+
+  const refreshConnections = async () => {
+    setLoading(true)
+    await loadConnections()
+  }
+
+  const goToPage = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pages && newPage !== page) {
+      setPage(newPage)
+      setLoading(true)
     }
   }
 
   const handleConnect = async (dbId: number) => {
     try {
       setConnectingId(dbId)
-      const response = await testConnection(dbId)
-      if (response.data.success) {
-        // Get full connection details with tables
-        const detailResponse = await API.get(`/api/v1/connections/${dbId}`)
-        if (detailResponse.data.data) {
-          const conn = detailResponse.data.data
-          setActiveConnectionId(dbId)
-          onConnectionSelect({
-            id: conn.id,
-            host: conn.host,
-            database: conn.database,
-            username: conn.username,
-            tables: conn.tables || []
-          })
-          setMessage('')
-        }
-      } else {
-        setMessage(response.data.message || 'Connection failed')
+      // A failed connection is a 200 with success:false — the driver message
+      // is inside data, so it is surfaced verbatim in the UI.
+      const testResponse = await testConnection(dbId)
+      const testBody = testResponse.data as ApiEnvelope<{ success: boolean; message: string }>
+      if (!testBody.data?.success) {
+        setMessage(testBody.data?.message || testBody.message || 'Connection failed')
+        return
       }
-    } catch (err: any) {
-      setMessage(err?.response?.data?.message || 'Connection failed')
+
+      // Get full connection details with tables
+      const detailResponse = await getConnection(dbId)
+      const detailBody = detailResponse.data as ApiEnvelope<ConnectionDetail>
+      if (detailBody.data) {
+        const conn = detailBody.data
+        setActiveConnectionId(dbId)
+        onConnectionSelect({
+          id: conn.id,
+          host: conn.host,
+          database: conn.database,
+          username: conn.username,
+          tables: conn.tables || []
+        })
+        setMessage('')
+      }
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, 'Connection failed'))
     } finally {
       setConnectingId(null)
     }
@@ -85,18 +126,19 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const handleDelete = async (dbId: number) => {
     try {
       const response = await deleteConnection(dbId)
-      if (response.data.success) {
+      const body = response.data as ApiEnvelope<null>
+      if (body.success) {
         if (activeConnectionId === dbId) {
           setActiveConnectionId(null)
           onConnectionSelect(null)
         }
-        loadConnections()
+        void refreshConnections()
         setMessage('Connection deleted')
       } else {
-        setMessage(response.data.message || 'Failed to delete')
+        setMessage(body.message || 'Failed to delete')
       }
-    } catch (err: any) {
-      setMessage(err?.response?.data?.message || 'Failed to delete')
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, 'Failed to delete'))
     }
   }
 
@@ -212,7 +254,7 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
               <div style={styles.pagination}>
                 <button
                   style={{...styles.pageBtn, ...(page === 1 ? styles.pageBtnDisabled : {})}}
-                  onClick={() => setPage(page - 1)}
+                  onClick={() => goToPage(page - 1)}
                   disabled={page === 1}
                 >
                   Previous
@@ -222,7 +264,7 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
                 </span>
                 <button
                   style={{...styles.pageBtn, ...(page === pages ? styles.pageBtnDisabled : {})}}
-                  onClick={() => setPage(page + 1)}
+                  onClick={() => goToPage(page + 1)}
                   disabled={page === pages}
                 >
                   Next

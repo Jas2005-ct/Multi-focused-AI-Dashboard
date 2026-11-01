@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MIN: int = 60
 
     # Google OAuth (optional; absent -> OAuth login disabled)
+    # Master switch: when False the /auth/login and /auth/callback routes
+    # answer 503 instead of crashing, and the frontend hides the Google
+    # button. Set ENABLE_GOOGLE_OAUTH=true (plus the client id/secret) to
+    # re-enable it.
+    ENABLE_GOOGLE_OAUTH: bool = False
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
@@ -69,6 +74,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.FLASK_ENV.strip().lower() == "production"
+
+    @property
+    def google_oauth_enabled(self) -> bool:
+        """True only when OAuth is switched on *and* fully configured.
+
+        The master switch (ENABLE_GOOGLE_OAUTH) is off by default; the
+        client id/secret are still required, so a half-configured
+        deployment can never crash the OAuth routes.
+        """
+        return bool(self.ENABLE_GOOGLE_OAUTH) and bool(
+            self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET
+        )
 
     @property
     def allowed_origin_list(self) -> list[str]:

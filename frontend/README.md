@@ -1,73 +1,57 @@
-# React + TypeScript + Vite
+# AI Dashboard — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite client for the AI Dashboard backend.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+cp .env.example .env      # then set VITE_API_URL
+npm run dev               # http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Environment
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:5000` | Backend base URL (no trailing slash) |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server with HMR |
+| `npm run build` | Type-check (`tsc -b`) + production build to `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run lint` | ESLint (TypeScript) |
+
+## Structure
+
 ```
+src/
+├── config.ts           # API_URL + Google OAuth URL (single source of truth)
+├── api/
+│   ├── client.ts       # axios instance: Bearer injection, X-Request-ID,
+│   │                   #   single-flight refresh on TOKEN_EXPIRED, 401 → logout
+│   ├── authapi.ts      # auth pair storage (saveAuth / clearAuth / refreshSession)
+│   └── dashboardapi.ts # typed calls to /api/v1 (connections, ai/query)
+├── pages/              # login, register, forgotpassword, dashboard
+├── components/         # SQLQueryOptimizer, DBConnectionForm, SavedConnections,
+│   │                   #   ErrorModal, ApiStatus
+├── routes/             # protectedroutes.tsx (auth guard)
+└── types/              # auth.ts, connection.ts
+```
+
+## Auth model
+
+- Tokens live in `localStorage`: `token` (access, 15 min), `refreshToken` (rotating, 7 days), `user`.
+- On `401` with `code: "TOKEN_EXPIRED"`, `api/client.ts` refreshes **once** (single-flight, so
+  concurrent requests share one rotation) and replays the original request.
+- If rotation fails, credentials are cleared and the user is redirected to `/`.
+
+## API base
+
+All API calls target the versioned surface (`/api/v1`). The legacy `/api/*` endpoints still
+exist on the backend but are deprecated — do not use them from new code.
+
+See [`../API_REFERENCE.md`](../API_REFERENCE.md) for the full endpoint contract.

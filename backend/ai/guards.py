@@ -1,9 +1,10 @@
 """SQL safety guards using sqlglot AST validation (Phase 4)."""
 
 import re
+from typing import Tuple
+
 import sqlglot
 from sqlglot import exp
-from typing import Tuple, List
 
 # Write intent patterns (improved over regex-only)
 _WRITE_PATTERNS = re.compile(
@@ -30,48 +31,67 @@ def validate_sql_ast(sql: str) -> Tuple[bool, str]:
     try:
         # Parse with PostgreSQL dialect
         parsed = sqlglot.parse(sql, dialect="postgres", read=None)
-        
+
         if not parsed or len(parsed) != 1:
             return False, "Multiple statements not allowed"
-        
+
         stmt = parsed[0]
-        
+
         # Must be SELECT or WITH (CTE)
         if not isinstance(stmt, (exp.Select, exp.With)):
             # Check for write operations
             write_types = (
-                exp.Insert, exp.Update, exp.Delete, exp.Create, 
-                exp.Alter, exp.Drop, exp.Truncate, exp.Merge
+                exp.Insert,
+                exp.Update,
+                exp.Delete,
+                exp.Create,
+                exp.Alter,
+                exp.Drop,
+                exp.Truncate,
+                exp.Merge,
             )
             if isinstance(stmt, write_types):
                 return False, "Write operations not permitted — this dashboard is read-only"
             return False, f"Query must start with SELECT or WITH. Found: {type(stmt).__name__}"
-        
+
         # Check for dangerous patterns in the AST
         for node in stmt.walk():
             # Block subqueries that could be used for injection
             if isinstance(node, exp.Subquery):
                 parent = node.parent
-                if isinstance(parent, (exp.Select, exp.From)) and not isinstance(parent, exp.Exists):
+                if isinstance(parent, (exp.Select, exp.From)) and not isinstance(
+                    parent, exp.Exists
+                ):
                     pass  # Allow legitimate subqueries in FROM/WHERE
-            
+
             # Block dangerous functions
             if isinstance(node, exp.Anonymous):
                 dangerous_funcs = {
-                    'sleep', 'benchmark', 'waitfor', 'delay', 'pg_sleep',
-                    'load_file', 'into_outfile', 'into_dumpfile',
-                    'xp_cmdshell', 'sp_oacreate', 'sp_oamethod',
-                    'exec', 'execute', 'system', 'shell'
+                    "sleep",
+                    "benchmark",
+                    "waitfor",
+                    "delay",
+                    "pg_sleep",
+                    "load_file",
+                    "into_outfile",
+                    "into_dumpfile",
+                    "xp_cmdshell",
+                    "sp_oacreate",
+                    "sp_oamethod",
+                    "exec",
+                    "execute",
+                    "system",
+                    "shell",
                 }
                 if node.this.lower() in dangerous_funcs:
                     return False, f"Dangerous function detected: {node.this}"
-            
+
             # Block comments (AST preserves them)
             if isinstance(node, exp.Comment):
                 return False, "Comments not allowed in queries"
-        
+
         return True, ""
-        
+
     except sqlglot.errors.ParseError as e:
         return False, f"SQL parse error: {e}"
     except Exception as e:
@@ -80,21 +100,27 @@ def validate_sql_ast(sql: str) -> Tuple[bool, str]:
 
 def add_safety_limits(sql: str) -> str:
     """Add LIMIT and statement timeout to query if not present."""
-    parsed = sqlglot.parse(sql, dialect="postgres", read=None)[0]
-    
-    # Add LIMIT if not present and it's a SELECT
-    if isinstance(parsed, exp.Select) and not parsed.args.get('limit'):
+    if not sql or not sql.strip():
+        return sql
+    statements = sqlglot.parse(sql, dialect="postgres", read=None)
+    if not statements:
+        return sql
+    parsed = statements[0]
+
+    # Add LIMIT if not present and it's a SELECT or WITH containing a SELECT
+    if isinstance(parsed, exp.Select) and not parsed.args.get("limit"):
         parsed = parsed.limit(MAX_ROWS)
-    
-    # Note: statement_timeout is set at session level, not in query
-    # SET LOCAL statement_timeout = 10000; -- would be set by connection pool
-    
+    elif isinstance(parsed, exp.With):
+        if isinstance(parsed.this, exp.Select) and not parsed.this.args.get("limit"):
+            parsed.set("this", parsed.this.limit(MAX_ROWS))
+
     return parsed.sql(dialect="postgres")
 
 
 def sanitize_table_name(table: str) -> str:
     """Validate and sanitize table name against injection."""
     import re
+
     TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     t = table.strip().strip('"').strip("'").lower()
     if not TABLE_NAME_RE.match(t):

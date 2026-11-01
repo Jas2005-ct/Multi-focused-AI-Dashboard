@@ -129,7 +129,8 @@ def test_sql_query_rejects_empty_sentence(app_client, auth_headers):
     ],
 )
 def test_write_guard_snapshot(sentence, expected):
-    from ai_dashboard.write_guard import is_write_intent
+    # Phase 4 moved the canonical guard to ai.guards; the regex is identical.
+    from ai.guards import is_write_intent
 
     assert is_write_intent(sentence) is expected
 
@@ -192,7 +193,8 @@ def test_db_connection_request_validation():
 
 
 def test_crypto_roundtrip():
-    from security.crypto import decrypt_value, encrypt_value
+    # Phase 3 moved the canonical crypto to connections.crypto (versioned Fernet).
+    from connections.crypto import decrypt_value, encrypt_value
 
     token = encrypt_value("s3cr3t-password")
     assert token != "s3cr3t-password"
@@ -202,9 +204,9 @@ def test_crypto_roundtrip():
 def test_crypto_legacy_plaintext_fallback():
     """Current lenient behavior: undecryptable values pass through.
 
-    Locked here so Phase 3 (strict crypto) changes it deliberately.
+    Locked here so the strict-crypto change happens deliberately.
     """
-    from security.crypto import decrypt_value
+    from connections.crypto import decrypt_value
 
     assert decrypt_value("plaintext-legacy-value") == "plaintext-legacy-value"
 

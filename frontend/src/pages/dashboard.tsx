@@ -20,7 +20,11 @@ function Dashboard() {
     const refreshToken = searchParams.get('refreshToken') ?? ''
     const userParam = searchParams.get('user')
     try {
-      const user = userParam ? JSON.parse(decodeURIComponent(userParam)) : getUser()
+      // userParam may be raw JSON or percent-encoded JSON (OAuth redirect).
+      // Try parsing raw first; fall back to decoding then parsing.
+      const user = userParam
+        ? (() => { try { return JSON.parse(userParam) } catch { return JSON.parse(decodeURIComponent(userParam)) } })()
+        : getUser()
       if (user && refreshToken) {
         saveAuth({ token, refreshToken, user })
       } else {

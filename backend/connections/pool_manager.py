@@ -4,18 +4,16 @@ Fixes Timer leak by using lazy expiry + explicit close instead of
 threading.Timer per pool.
 """
 
-import time
-import threading
 import logging
-from typing import Dict, Tuple
-from contextlib import contextmanager
+import threading
+import time
 from collections import OrderedDict
+from contextlib import contextmanager
+from typing import Dict, Tuple
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.pool import QueuePool
 from sqlalchemy.engine import Engine
-
-from config import get_settings
+from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +45,6 @@ class ConnectionPoolManager:
 
     def _make_engine(self, connection_string: str) -> Engine:
         """Create a new SQLAlchemy engine with appropriate dialect options."""
-        settings = get_settings()
         db_url = connection_string
 
         # Ensure proper dialect prefix for SQLAlchemy
@@ -83,8 +80,9 @@ class ConnectionPoolManager:
         if user_pools and len(user_pools) >= self.max_pools_per_user:
             # Evict oldest (first item in OrderedDict)
             lru_db_id, (engine, _) = user_pools.popitem(last=False)
-            engine.dispose()
             logger.info(f"Evicted LRU pool for user {user_id}, db {lru_db_id}")
+            return engine
+        return None
 
     def get_engine(self, user_id: int, db_id: int, connection_string: str) -> Engine:
         """
@@ -93,6 +91,7 @@ class ConnectionPoolManager:
         On access: moves pool to MRU position, refreshes expiry.
         On miss: creates new engine, evicts LRU if needed.
         """
+        engine_to_dispose = None
         with self._lock:
             # Get or create user's pool dict
             user_pools = self._pools.setdefault(user_id, OrderedDict())
@@ -106,17 +105,25 @@ class ConnectionPoolManager:
                     user_pools.move_to_end(db_id)
                     return engine
                 else:
-                    # Expired: dispose and remove
-                    engine.dispose()
-                    user_pools.pop(db_id)
+                    # Expired: remove and dispose outside lock
+                    engine_to_dispose, _ = user_pools.pop(db_id)
                     logger.info(f"Expired pool removed for user {user_id}, db {db_id}")
 
             # Miss or expired: create new pool
-            self._evict_lru_if_needed(user_id)
+            evicted = self._evict_lru_if_needed(user_id)
+            if evicted:
+                engine_to_dispose = evicted
             engine = self._make_engine(connection_string)
             user_pools[db_id] = (engine, time.time() + self.ttl)
             logger.info(f"Created connection pool for user {user_id}, db {db_id}")
-            return engine
+
+        if engine_to_dispose:
+            try:
+                engine_to_dispose.dispose()
+            except Exception as e:
+                logger.warning(f"Error disposing engine: {e}")
+
+        return engine
 
     @contextmanager
     def get_connection(self, user_id: int, db_id: int, connection_string: str):
@@ -149,11 +156,14 @@ class ConnectionPoolManager:
                 engine.dispose()
                 logger.info(f"Explicitly closed pool for user {user_id}, db {db_id}")
 
+    # Backward-compatibility alias for legacy code
+    _cleanup_pool = close_pool
+
     def close_user_pools(self, user_id: int) -> None:
         """Close all pools for a user."""
         with self._lock:
             if user_id in self._pools:
-                for db_id, (engine, _) in self._pools[user_id].items():
+                for engine, _ in self._pools[user_id].values():
                     engine.dispose()
                 self._pools.pop(user_id)
                 logger.info(f"Closed all pools for user {user_id}")

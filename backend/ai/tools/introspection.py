@@ -6,19 +6,25 @@ Uses Pydantic models for arguments and returns JSON-serializable results.
 
 import logging
 import re
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List
 
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
+from ai.guards import sanitize_table_name
 from connections.model import DBConnection
 from connections.service import (
-    get_tables as svc_get_tables,
-    get_table_schema as svc_get_table_schema,
-    get_full_schema as svc_get_full_schema,
     connection_pool,
 )
-from ai.guards import sanitize_table_name
+from connections.service import (
+    get_full_schema as svc_get_full_schema,
+)
+from connections.service import (
+    get_table_schema as svc_get_table_schema,
+)
+from connections.service import (
+    get_tables as svc_get_tables,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,7 @@ def _resolve_connection(user_id: int, db_id: int) -> DBConnection:
 
 
 # --- Pydantic argument models ---
+
 
 class ListTablesArgs(BaseModel):
     user_id: int = Field(..., description="User ID")
@@ -69,10 +76,13 @@ class GetFullSchemaArgs(BaseModel):
 class RunSQLArgs(BaseModel):
     user_id: int = Field(..., description="User ID")
     db_id: int = Field(..., description="Database connection ID")
-    query: str = Field(..., min_length=1, max_length=5000, description="Read-only SQL query (SELECT/WITH only)")
+    query: str = Field(
+        ..., min_length=1, max_length=5000, description="Read-only SQL query (SELECT/WITH only)"
+    )
 
 
 # --- Tool implementations ---
+
 
 def _list_tables_impl(args: ListTablesArgs) -> List[str]:
     conn = _resolve_connection(args.user_id, args.db_id)
@@ -82,14 +92,16 @@ def _list_tables_impl(args: ListTablesArgs) -> List[str]:
 def _describe_table_impl(args: DescribeTableArgs) -> Dict[str, Any]:
     table = sanitize_table_name(args.table_name)
     conn = _resolve_connection(args.user_id, args.db_id)
-    return svc_get_table_schema(args.user_id, args.db_id, conn.get_decrypted_connection_string(), table)
+    return svc_get_table_schema(
+        args.user_id, args.db_id, conn.get_decrypted_connection_string(), table
+    )
 
 
 def _sample_rows_impl(args: SampleRowsArgs) -> List[Dict[str, Any]]:
     table = sanitize_table_name(args.table_name)
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
-    
+
     # Verify table exists
     tables = svc_get_tables(args.user_id, args.db_id, conn_str)
     if table not in [x.lower() for x in tables]:
@@ -97,12 +109,13 @@ def _sample_rows_impl(args: SampleRowsArgs) -> List[Dict[str, Any]]:
         if not actual:
             raise ValueError(f"Table '{args.table_name}' not found. Available: {', '.join(tables)}")
         table = actual
-    
+
     with connection_pool.get_connection(args.user_id, args.db_id, conn_str) as c:
         from sqlalchemy import text
+
         result = c.execute(text(f'SELECT * FROM "{table}" LIMIT :lim'), {"lim": args.limit})
         cols = list(result.keys())
-        rows = [dict(zip(cols, row)) for row in result.fetchall()]
+        rows = [dict(zip(cols, row, strict=False)) for row in result.fetchall()]
         # Make JSON-serializable
         for r in rows:
             for k, v in list(r.items()):
@@ -118,16 +131,17 @@ def _count_rows_impl(args: CountRowsArgs) -> int:
     table = sanitize_table_name(args.table_name)
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
-    
+
     tables = svc_get_tables(args.user_id, args.db_id, conn_str)
     if table not in [x.lower() for x in tables]:
         actual = next((x for x in tables if x.lower() == table), None)
         if not actual:
             raise ValueError(f"Table '{args.table_name}' not found. Available: {', '.join(tables)}")
         table = actual
-    
+
     with connection_pool.get_connection(args.user_id, args.db_id, conn_str) as c:
         from sqlalchemy import text
+
         result = c.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
         return int(result.scalar() or 0)
 
@@ -140,18 +154,20 @@ def _get_full_schema_impl(args: GetFullSchemaArgs) -> Dict[str, Any]:
 def _run_sql_impl(args: RunSQLArgs) -> List[Dict[str, Any]]:
     # Validate SQL safety
     from ai.guards import validate_sql_ast
+
     is_safe, error = validate_sql_ast(args.query)
     if not is_safe:
         raise ValueError(error)
-    
+
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
-    
+
     with connection_pool.get_connection(args.user_id, args.db_id, conn_str) as c:
         from sqlalchemy import text
+
         result = c.execute(text(args.query))
         cols = list(result.keys())
-        rows = [dict(zip(cols, row)) for row in result.fetchall()[:50]]  # Cap at 50
+        rows = [dict(zip(cols, row, strict=False)) for row in result.fetchall()[:50]]  # Cap at 50
         for r in rows:
             for k, v in list(r.items()):
                 if hasattr(v, "isoformat"):

@@ -1,6 +1,6 @@
 """Connection model (Phase 3)."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -35,7 +35,7 @@ class DBConnection(db.Model):
     sslmode = Column(String(20), default="require", nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_used = Column(DateTime, nullable=True)
 
     # Relationship

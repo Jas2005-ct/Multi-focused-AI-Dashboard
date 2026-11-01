@@ -46,6 +46,26 @@ python-version = "3.10"
 line-length = 100
 target-version = "py310"
 
+[tool.ruff.lint]
+# Explicit rule set so `ruff check .` is deterministic in CI (ruff's implicit
+# default set changes between releases and was failing the build).
+select = [
+    "E4",   # pycodestyle: imports
+    "E7",   # pycodestyle: statements
+    "E9",   # pycodestyle: runtime errors
+    "F",    # pyflakes: undefined names, unused imports, redefinitions
+    "I",    # isort: import order
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+]
+# Line length is handled by black.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use long assertion messages.
+"tests/*" = ["B011", "SIM117"]
+
 [tool.black]
 line-length = 100
 target-version = ["py310"]

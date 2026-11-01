@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { saveDBConnection } from '../api/dashboardapi'
+import { getErrorMessage } from '../api/types'
 
 interface ConnectionData {
   name: string
@@ -85,25 +86,8 @@ function DBConnectionForm() {
       setSuccessMessage(response.data.message)
       setSuccess(true)
 
-      // Save to localStorage for client-side display
-      try {
-        const saved = localStorage.getItem('dbConnections')
-        const connections = saved ? JSON.parse(saved) : []
-        const newConnection = {
-          id: Date.now(),
-          host: formData.host,
-          port: formData.port,
-          database: formData.database,
-          username: formData.username
-        }
-        connections.push(newConnection)
-        localStorage.setItem('dbConnections', JSON.stringify(connections))
-        
-        // Dispatch custom event to notify SavedConnections component
-        window.dispatchEvent(new Event('connectionAdded'))
-      } catch (storageErr) {
-        console.error('Failed to save to localStorage:', storageErr)
-      }
+      // Notify SavedConnections component to refresh list from server
+      window.dispatchEvent(new Event('connectionAdded'))
 
       // Reset form
       setFormData({
@@ -118,9 +102,8 @@ function DBConnectionForm() {
         sslmode: 'require'
       })
 
-    } catch (err: any) {
-      const errMessage = err?.response?.data?.message || err?.response?.data?.error || 'Failed to save connection'
-      setError(errMessage)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to save connection'))
       setSuccess(false)
     } finally {
       setLoading(false)

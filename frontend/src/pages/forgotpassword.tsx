@@ -94,7 +94,7 @@ function ForgotPassword() {
         {step === 2 && (
           <form onSubmit={handleVerify} style={styles.form}>
             <div style={styles.inputGroup}>
-              <label style={styles.label}>6-digit OTP (check Flask terminal)</label>
+              <label style={styles.label}>6-digit OTP</label>
               <input value={otp} onChange={e => setOtp(e.target.value)} placeholder="123456" maxLength={6} style={styles.input} />
             </div>
             <button type="submit" disabled={loading} style={{ ...styles.button, ...(loading ? styles.buttonDisabled : {}) }}>

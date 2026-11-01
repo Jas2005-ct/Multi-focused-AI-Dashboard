@@ -1,491 +1,355 @@
-# AI Dashboard - Backend API Reference
+# AI Dashboard — Backend API Reference
 
-**Base URL:** `http://localhost:5000` (or your configured backend URL)
+**Base URL:** `http://localhost:5000` (or `VITE_API_URL` / `API_URL` in the frontend)
 
-**CORS:** Configured for `http://localhost:5173` and `http://127.0.0.1:5173`
+**Versioned surface:** `/api/v1` — **use this.** The legacy `/api/*` surface still works but is
+deprecated and answers with `Deprecation: true` + `Link: …; rel="successor-version"`.
 
----
+**Interactive docs:** `/openapi/swagger` (Swagger UI) · `/openapi.json` (OpenAPI 3.0 spec)
 
-## Authentication
-
-Most API endpoints require authentication via JWT token in the `Authorization` header:
-
-```
-Authorization: Bearer <jwt_token>
-```
-
-The token is obtained from:
-- Login endpoints (email/password or Google OAuth)
-- Stored in localStorage as `token` after login
+**CORS:** `http://localhost:5173`, `http://127.0.0.1:5173`
 
 ---
 
-## Auth Endpoints (`/auth`)
+## 1. Conventions
 
-### 1. Email Login
+### 1.1 Authentication
 
-**POST** `/auth/login`
-
-Authenticate with email and password.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "Password123"
-}
-```
-
-**Response (200):**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "name": "John Doe"
-  }
-}
-```
-
-**Error Responses:**
-- `400` - Validation error (invalid email format)
-- `401` - Invalid credentials
-
----
-
-### 2. Register
-
-**POST** `/auth/register`
-
-Create a new account with email and password.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "Password123",
-  "name": "John Doe"
-}
-```
-
-**Password Requirements:**
-- Minimum 8 characters
-- At least one uppercase letter
-- At least one lowercase letter
-- At least one digit
-
-**Response (201):**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "name": "John Doe"
-  }
-}
-```
-
-**Error Responses:**
-- `400` - Validation error
-- `409` - Email already exists
-
----
-
-### 3. Google OAuth Login
-
-**GET** `/auth/login`
-
-Redirects to Google OAuth login page. After successful authentication, redirects to:
+Every `/api/*` and `/auth/*` endpoint except `GET /auth/login`, `GET /auth/callback`,
+`GET /health`, `GET /ready` and `GET /openapi.json` requires a **Bearer access token**:
 
 ```
-/dashboard?token=<jwt_token>&user=<encoded_user_json>
+Authorization: Bearer <access_token>
 ```
 
-The `user` parameter contains URL-encoded JSON:
-```json
-{"id": 1, "email": "user@example.com", "name": "John Doe"}
-```
+There is **no session cookie fallback**. An unauthenticated request to a protected API route
+answers `401` with a JSON body (never a redirect).
 
-**Note:** The frontend should extract both `token` and `user` from the URL query parameters and store them in localStorage.
+### 1.2 Token model
 
----
+| Token | TTL | Storage | Notes |
+|---|---|---|---|
+| Access | 15 min | `localStorage.token` | Sent as `Authorization: Bearer …` |
+| Refresh | 7 days | `localStorage.refreshToken` | Rotating: single use, replaced on every refresh |
 
-### 4. Google OAuth Callback
+Both are signed HS256 JWTs with a `typ` claim (`access` / `refresh`) so a token can never be
+used for the wrong purpose.
 
-**GET** `/auth/callback`
+### 1.3 Error envelope
 
-Internal endpoint for Google OAuth callback. Do not call directly.
+Every error response uses the same shape:
 
----
-
-## SQL Query Endpoints (`/api`)
-
-All endpoints below require JWT authentication.
-
-### 5. Generate SQL Query
-
-**POST** `/api/sql-query/`
-
-Generate an optimized SQL query from natural language input.
-
-**Request Body:**
-```json
-{
-  "sentence": "Find all users who signed up in the last 30 days",
-  "db_id": 1  // Optional - for schema context
-}
-```
-
-**Field Validation:**
-- `sentence` - Required, max 5000 characters, cannot be empty
-- `db_id` - Optional, ID of saved database connection
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "output_query": "SELECT * FROM users WHERE created_at >= NOW() - INTERVAL '30 days'",
-  "metadata": {
-    "tables": ["users"],
-    "columns": ["id", "email", "created_at"]
-  }
-}
-```
-
-**Error Response:**
 ```json
 {
   "success": false,
-  "error": "Invalid or harmful query detected",
-  "error_type": "security_error",
-  "output_query": null
+  "error": "Connection not found",
+  "message": "No connection with id 26 belongs to this user.",
+  "request_id": "0f3c1a2b-…"
 }
 ```
 
-**Error Types:**
-- `api_error` - LLM service error (500)
-- `security_error` - Potentially harmful query blocked (400)
-- `general` - Other validation errors (400)
+`request_id` is echoed in the `X-Request-ID` response header and is also the first field to
+quote when reporting a problem.
+
+### 1.4 Error codes on 401
+
+`require_auth` returns a machine-readable `code` so the client can decide whether to retry:
+
+| `code` | Meaning | Client action |
+|---|---|---|
+| `MISSING_TOKEN` | No `Authorization: Bearer` header | Send the user to login |
+| `TOKEN_EXPIRED` | Access token expired | Rotate once via `POST /auth/refresh`, then replay |
+| `INVALID_TOKEN` | Malformed / wrong `typ` / revoked | Clear credentials, send to login |
+
+The frontend implements this as a **single-flight** refresh: concurrent `TOKEN_EXPIRED`
+responses share one rotation, so a burst of parallel requests cannot burn the refresh family.
 
 ---
 
-### 6. Save Database Connection
+## 2. System
 
-**POST** `/api/db-connection`
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | no | Liveness + database connectivity |
+| GET | `/ready` | no | Readiness probe for load balancers |
+| GET | `/openapi.json` | no | OpenAPI 3.0 specification |
+| GET | `/api/v1/health` | no | Same as `/health`, versioned alias |
+| GET | `/api/v1/ready` | no | Same as `/ready`, versioned alias |
 
-Store database connection details securely (passwords are encrypted).
+```jsonc
+// GET /health
+{ "status": "ok", "database": "connected" }        // 200
+{ "status": "error", "database": "error" }          // 503
+```
 
-**Request Body (Individual Fields):**
+---
+
+## 3. Auth — `/auth`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/auth/login` | no | Start Google OAuth (redirect) — **503 when OAuth is disabled** |
+| GET | `/auth/callback` | no | OAuth callback → redirects to `/dashboard?token=…&refreshToken=…&user=…` |
+| POST | `/auth/login` | no | Email + password login |
+| POST | `/auth/register` | no | Create account |
+| POST | `/auth/logout` | no | Clear the browser session (no-op for JWT clients) |
+| POST | `/auth/refresh` | no | Rotate the refresh token → new pair |
+| GET | `/auth/me` | yes | Current user profile |
+| POST | `/auth/forgot-password` | no | Request a password-reset OTP |
+| POST | `/auth/resend-otp` | no | Resend the OTP (same silent-cooldown behaviour) |
+| POST | `/auth/verify-otp` | no | Verify the OTP without consuming it |
+| POST | `/auth/reset-password` | no | Consume the OTP and set a new password |
+
+### 3.1 `POST /auth/login` · `POST /auth/register`
+
+Request:
+
+```json
+{ "email": "user@example.com", "password": "Str0ngPass!2345", "name": "User" }
+```
+
+Password rules: >= 8 chars, one uppercase, one lowercase, one digit. A password
+that fails the policy answers `422` with a readable reason and **never** echoes
+the submitted value back:
+
 ```json
 {
-  "host": "localhost",
+  "success": false,
+  "error": "Validation failed",
+  "message": "Password must contain at least one uppercase letter",
+  "details": [ { "type": "value_error", "loc": ["password"], "msg": "Password must contain at least one uppercase letter" } ]
+}
+```
+
+Response `201` (register) / `200` (login):
+
+```json
+{
+  "token": "<access jwt>",
+  "refreshToken": "<refresh jwt>",
+  "user": { "id": 1, "email": "user@example.com", "name": "User" }
+}
+```
+
+Errors: `400` invalid input, `401` bad credentials, `409` email already registered.
+
+### 3.2 `POST /auth/refresh`
+
+```json
+{ "refreshToken": "<refresh jwt>" }
+```
+
+→ `200` with a **new** `{ token, refreshToken, user }` pair. The presented token is revoked
+immediately. Replaying a consumed refresh token is treated as theft: the **entire token family
+for that user is revoked** and the call answers `401`.
+
+### 3.3 `GET /auth/me`
+
+→ `200 { "id": 1, "email": "user@example.com", "name": "User" }`
+
+### 3.5 Google OAuth (disabled by default)
+
+Google sign-in is **off** unless `ENABLE_GOOGLE_OAUTH=true` is set on the backend
+(plus `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`). The frontend hides the
+"Continue with Google" button unless `VITE_ENABLE_GOOGLE_OAUTH=true` is set.
+
+While disabled, `GET /auth/login` and `GET /auth/callback` answer `503`:
+
+```json
+{
+  "success": false,
+  "error": "Google sign-in is disabled",
+  "message": "Google OAuth is currently disabled. Please sign in with your email and password."
+}
+```
+
+To re-enable it, set these on the backend and restart:
+
+```bash
+ENABLE_GOOGLE_OAUTH=true
+GOOGLE_CLIENT_ID=…
+GOOGLE_CLIENT_SECRET=…
+```
+
+and on the frontend:
+
+```bash
+VITE_ENABLE_GOOGLE_OAUTH=true
+```
+
+### 3.6 OTP flow
+
+`POST /auth/forgot-password` and `POST /auth/resend-otp` **always answer `200` with the same
+message**, whether or not the address exists — this prevents account enumeration. Requests
+inside the 60-second cooldown are silently dropped (still `200`, no `429`), so an observer
+cannot distinguish a known address from a recently-mailed one.
+
+`POST /auth/verify-otp` → `200` on success, `400` invalid OTP, `429` too many attempts.
+`POST /auth/reset-password` → `200` on success, `400` invalid OTP / weak password.
+
+---
+
+## 4. AI — `/api/v1/ai/query`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/ai/query` | yes | SQL generation or natural-language data answer |
+
+```json
+{
+  "query": "how many projects do I have?",
+  "connection_id": 26,
+  "mode": "auto"
+}
+```
+
+| `mode` | Behaviour |
+|---|---|
+| `auto` (default) | LangGraph ReAct agent — the model picks the tools to call |
+| `sql` | LCEL chain — direct single-query generation |
+| `answer` | Agent restricted to data answers |
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "ok",
+  "data": {
+    "type": "answer",
+    "answer": "There are 3 projects.",
+    "tables": ["portfolio_project"],
+    "count": 3,
+    "rows": [],
+    "toolCalls": [
+      { "name": "count_rows", "args": { "user_id": 1, "db_id": 26, "table_name": "portfolio_project" }, "result": 3 }
+    ]
+  },
+  "request_id": "…"
+}
+```
+
+For `type: "query"` the payload carries `sql` instead of `answer`/`rows`.
+
+**Read-only guarantee.** All generated SQL is parsed with `sqlglot` and rejected unless it is
+a single `SELECT`/`WITH` statement; write intent in the question is refused before any tool
+runs. Row results are capped at 50 and `LIMIT 50` is added when missing.
+
+Errors: `400` validation, `401` auth, `500` upstream LLM / target-DB failure.
+
+---
+
+## 5. Database connections — `/api/v1/connections`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/connections` | yes | Create a connection (credentials encrypted) |
+| GET | `/api/v1/connections` | yes | List connections (paginated) |
+| GET | `/api/v1/connections/{db_id}` | yes | One connection + its table list |
+| DELETE | `/api/v1/connections/{db_id}` | yes | Delete a connection and release its pool |
+| POST | `/api/v1/connections/{db_id}/test` | yes | Test reachability + credentials |
+| GET | `/api/v1/connections/{db_id}/tables` | yes | Table names |
+| GET | `/api/v1/connections/{db_id}/tables/{table_name}` | yes | Column metadata for one table |
+
+### 5.1 `POST /api/v1/connections`
+
+```json
+{
+  "name": "Production DB",
+  "host": "db.example.com",
   "port": 5432,
-  "database": "mydb",
-  "username": "dbuser",
-  "password": "dbpassword",
-  "db_type": "postgresql"  // or "mysql"
+  "database": "app",
+  "username": "app_user",
+  "password": "••••••••",
+  "db_type": "postgresql",
+  "sslmode": "require"
 }
 ```
 
-**Request Body (Connection String):**
-```json
-{
-  "connection_string": "postgresql://dbuser:dbpassword@localhost:5432/mydb",
-  "db_type": "postgresql"
-}
-```
+`db_type` ∈ `postgresql` | `mysql`. `sslmode` ∈ `require` | `verify-ca` | `verify-full` |
+`allow` | `disable`. `connection_string` may be supplied instead of the discrete fields.
 
-**Field Validation:**
-- `port` - Must be between 1-65535
-- `db_type` - Must be: `postgresql`, `postgres`, or `mysql`
+Secrets are stored encrypted (versioned Fernet) and **never** returned by any endpoint.
 
-**Response (200):**
+### 5.2 `GET /api/v1/connections?page=1&per_page=20`
+
 ```json
 {
   "success": true,
-  "message": "Database connection saved successfully"
-}
-```
-
-**Error Responses:**
-- `400` - Missing required fields or validation error
-- `401` - Unauthorized
-- `409` - Connection already exists
-- `500` - Database error
-
----
-
-### 7. Test Database Connection
-
-**POST** `/api/test-connection/`
-
-Test if a saved database connection is valid.
-
-**Request Body:**
-```json
-{
-  "db_id": 1
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "Connection successful",
-  "connection": {
-    "id": 1,
-    "host": "localhost",
-    "port": 5432,
-    "database": "mydb",
-    "username": "dbuser",
-    "created_at": "2024-01-15T10:30:00"
+  "message": "ok",
+  "data": {
+    "page": 1, "per_page": 20, "total": 2, "pages": 1,
+    "connections": [
+      { "id": 26, "name": "Production DB", "host": "db.example.com", "port": 5432,
+        "database": "app", "username": "app_user", "db_type": "postgresql",
+        "sslmode": "require", "created_at": "2026-10-10T12:00:00", "last_used": null }
+    ]
   },
-  "tables": ["users", "orders", "products"]
+  "request_id": "…"
 }
 ```
 
-**Response (500) - Connection Failed:**
-```json
-{
-  "success": false,
-  "message": "Failed to connect: connection refused"
-}
+### 5.3 `POST /api/v1/connections/{db_id}/test`
+
+→ `200` with `{ "success": true, "message": "Connection successful" }` when the target
+database answers `SELECT 1`. A failed connection also answers `200`, with
+`success: false` and the underlying driver message in `message` (e.g. *"Connection failed:
+could not translate host name …"*) so the UI can show something actionable.
+
+### 5.4 Ownership
+
+Every connection endpoint is scoped to the authenticated user. A row belonging to another
+user is reported as `404` (not `403`) so ids cannot be probed.
+
+---
+
+## 6. Legacy surface — `/api/*` (deprecated)
+
+| Method | Path | Superseded by |
+|---|---|---|
+| GET | `/api/` | — (greeting) |
+| POST | `/api/sql-query/` | `POST /api/v1/ai/query` |
+| POST | `/api/ai/query` | `POST /api/v1/ai/query` |
+| POST | `/api/db-connection` | `POST /api/v1/connections` |
+| POST | `/api/test-connection/` | `POST /api/v1/connections/{id}/test` |
+| DELETE | `/api/delete-connection` | `DELETE /api/v1/connections/{id}` |
+| GET | `/api/get-connections/` | `GET /api/v1/connections` |
+
+These still work, but they return the **old flat response shapes** (no `data` envelope) and
+carry `Deprecation: true`. New integrations must use `/api/v1`.
+
+---
+
+## 7. Rate limits
+
+`flask-limiter` is active in production (disabled when `FLASK_ENV=testing`). Limits are
+configured in `backend/config.py`; the storage backend is in-memory by default and should be
+pointed at Redis for multi-worker deployments.
+
+---
+
+## 8. Quick reference (curl)
+
+```bash
+# Register
+curl -X POST http://localhost:5000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"user@example.com","password":"Str0ngPass!2345","name":"User"}'
+
+# Use the access token
+TOKEN=<access_token from register>
+curl http://localhost:5000/api/v1/connections -H "Authorization: Bearer $TOKEN"
+
+# Ask a question
+curl -X POST http://localhost:5000/api/v1/ai/query \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query":"what tables exist?","connection_id":26,"mode":"auto"}'
 ```
 
 ---
 
-### 8. Get Database Connections
+## 9. Related documents
 
-**GET** `/api/get-connections/`
-
-Retrieve all saved database connections for the authenticated user.
-
-**Query Parameters:**
-- `db_id` (optional) - Get specific connection details including tables
-
-**Response (200) - All Connections:**
-```json
-{
-  "success": true,
-  "message": "Connections retrieved successfully",
-  "connections": [
-    {
-      "id": 1,
-      "host": "localhost",
-      "port": 5432,
-      "database": "mydb",
-      "username": "dbuser",
-      "created_at": "2024-01-15T10:30:00"
-    }
-  ]
-}
-```
-
-**Response (200) - Single Connection (with db_id):**
-```json
-{
-  "success": true,
-  "message": "Connection successful",
-  "connection": {
-    "id": 1,
-    "host": "localhost",
-    "port": 5432,
-    "database": "mydb",
-    "username": "dbuser",
-    "created_at": "2024-01-15T10:30:00"
-  },
-  "tables": ["users", "orders", "products"]
-}
-```
-
----
-
-### 9. Delete Database Connection
-
-**DELETE** `/api/delete-connection`
-
-Delete a saved database connection.
-
-**Request Body:**
-```json
-{
-  "db_id": 1
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "Connection deleted successfully"
-}
-```
-
-**Error Responses:**
-- `404` - Connection not found
-- `401` - Unauthorized (not owner)
-- `500` - Database error
-
----
-
-## Data Models
-
-### User
-```typescript
-interface User {
-  id: number;
-  email: string;
-  name: string;
-}
-```
-
-### DBConnection
-```typescript
-interface DBConnection {
-  id: number;
-  host: string;
-  port: number;
-  database: string;
-  username: string;
-  db_type: 'postgresql' | 'mysql';
-  created_at: string; // ISO 8601 format
-}
-```
-
-### AuthSuccess
-```typescript
-interface AuthSuccess {
-  token: string;
-  user: User;
-}
-```
-
-### QueryResponse
-```typescript
-interface QueryResponse {
-  success: boolean;
-  output_query: string | null;
-  metadata?: {
-    tables?: string[];
-    columns?: string[];
-  };
-  error?: string;
-  error_type?: 'api_error' | 'security_error' | 'general';
-}
-```
-
----
-
-## Error Response Format
-
-All errors follow this structure:
-
-```json
-{
-  "error": "Error Title",
-  "message": "Detailed error description"
-}
-```
-
----
-
-## Frontend Implementation Notes
-
-### Token Storage
-Store the JWT token and user data in localStorage after login:
-
-```typescript
-// After login
-localStorage.setItem('token', response.data.token);
-localStorage.setItem('user', JSON.stringify(response.data.user));
-
-// Helper functions
-export const getToken = () => localStorage.getItem('token');
-export const getUser = () => {
-  const userStr = localStorage.getItem('user');
-  return userStr ? JSON.parse(userStr) : null;
-};
-export const logout = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
-};
-```
-
-### Axios Configuration
-
-```typescript
-import axios from 'axios';
-
-const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL
-});
-
-// Add auth token to requests
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-```
-
-### Handling Google OAuth Redirect
-
-After Google OAuth redirects back to `/dashboard`, extract the token and user:
-
-```typescript
-import { useSearchParams } from 'react-router-dom';
-
-function Dashboard() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  
-  useEffect(() => {
-    const token = searchParams.get('token');
-    const userParam = searchParams.get('user');
-    
-    if (token) {
-      localStorage.setItem('token', token);
-      
-      if (userParam) {
-        try {
-          const user = JSON.parse(decodeURIComponent(userParam));
-          localStorage.setItem('user', JSON.stringify(user));
-        } catch {
-          // ignore invalid user data
-        }
-      }
-      
-      // Clean up URL
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-}
-```
-
----
-
-## Environment Variables
-
-Frontend `.env` file:
-
-```
-VITE_API_URL=http://localhost:5000
-```
-
----
-
-## Common HTTP Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200 | Success |
-| 201 | Created (registration) |
-| 400 | Bad Request (validation error) |
-| 401 | Unauthorized (invalid/missing token) |
-| 404 | Not Found |
-| 409 | Conflict (duplicate resource) |
-| 500 | Internal Server Error |
+- [`docs/CODEBASE_ANALYSIS.md`](docs/CODEBASE_ANALYSIS.md) — structure, folder map, known debt
+- [`docs/runbook.md`](docs/runbook.md) — deployment, key rotation, troubleshooting
+- [`docs/plan.md`](docs/plan.md) — the completed 8-phase revamp plan

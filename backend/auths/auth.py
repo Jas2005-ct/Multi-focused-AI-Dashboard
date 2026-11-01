@@ -24,6 +24,7 @@ from auths.schemas import (
     VerifyOtpRequest,
 )
 from auths.tasks import dispatch_otp
+from common.responses import error_response
 from security.dec import require_auth
 
 auth_bp = APIBlueprint("auth", __name__)
@@ -93,6 +94,18 @@ GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configura
 
 @auth_bp.get("/login", tags=[auth_tag], summary="Initiate Google OAuth login")
 def google_login():
+    """Start the Google OAuth flow.
+
+    Disabled by default (ENABLE_GOOGLE_OAUTH=false). When it is off the route
+    answers 503 with a clear message instead of raising, so the frontend can
+    hide the button and the API stays predictable.
+    """
+    if not current_app.config.get("GOOGLE_OAUTH_ENABLED", False):
+        return error_response(
+            "Google sign-in is disabled",
+            "Google OAuth is currently disabled. Please sign in with your email and password.",
+            503,
+        )
     client = current_app.oauth.google
     redirect_uri = url_for("auth.google_callback", _external=True)
     return client.authorize_redirect(redirect_uri)
@@ -100,6 +113,13 @@ def google_login():
 
 @auth_bp.get("/callback", tags=[auth_tag], summary="Google OAuth callback")
 def google_callback():
+    """Handle the Google OAuth callback and issue a token pair."""
+    if not current_app.config.get("GOOGLE_OAUTH_ENABLED", False):
+        return error_response(
+            "Google sign-in is disabled",
+            "Google OAuth is currently disabled.",
+            503,
+        )
     client = current_app.oauth.google
     token = client.authorize_access_token()
     user_info = token.get("userinfo")
@@ -446,7 +466,7 @@ def refresh(body: RefreshRequest):
             401,
         )
 
-    user = User.query.get(record.user_id)
+    user = db.session.get(User, record.user_id)
     if not user:
         return (
             jsonify(
@@ -477,7 +497,7 @@ def refresh(body: RefreshRequest):
 @auth_bp.get("/me", tags=[auth_tag], summary="Current user")
 @require_auth
 def me():
-    user = User.query.get(g.user_id)
+    user = db.session.get(User, g.user_id)
     if not user:
         return (
             jsonify(
