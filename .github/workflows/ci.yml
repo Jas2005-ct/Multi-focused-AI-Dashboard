@@ -35,7 +35,10 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        # --extra dev installs the optional-dependency group that holds
+        # ruff / black / pytest. Without it `uv run ruff` fails with
+        # "Failed to spawn: ruff".
+        run: uv sync --frozen --extra dev
 
       - name: Run linter (ruff)
         run: uv run ruff check .
