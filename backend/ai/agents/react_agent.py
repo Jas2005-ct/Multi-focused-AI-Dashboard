@@ -31,6 +31,10 @@ Instructions:
 - Always use exact table names from the schema above or discovered via list_tables.
 - Map user terms to the closest matching table by meaning based on the provided schema.
 - If unsure, prefer list_tables or describe_table first, then act.
+- Reply with a short prose summary of at most 3 sentences.
+- Do NOT write markdown tables - the interface renders the underlying rows itself,
+  so re-typing them as a table only loses fidelity and breaks the layout.
+- Refer to columns and values in plain sentences.
 
 Examples:
 User: "what tables exist" → Call list_tables()
@@ -91,6 +95,15 @@ def run_agent_question(
     tool_map = {t.name: t for t in ALL_TOOLS}
     trace: List[Dict[str, Any]] = []
 
+    # Structured results captured from the tools. Without these the answer
+    # reaches the client as prose only, and the model has to re-type the rows
+    # into a markdown table — which is lossy and unreadable. The API contract
+    # (rows / count / tables) has always been there; this fills it in.
+    rows: List[Dict[str, Any]] = []
+    rows_table: str | None = None
+    total_count: int | None = None
+    tables: List[str] = []
+
     logger.info("AGENT START sentence=%r user_id=%s db_id=%s", sentence, user_id, db_id)
     logger.info("AGENT TOOLS available: %s", ", ".join(t.name for t in ALL_TOOLS))
 
@@ -120,10 +133,10 @@ def run_agent_question(
                     "type": "answer",
                     "answer": ai_msg.content or "",
                     "toolCalls": trace,
-                    "tables": [],
-                    "rows": [],
-                    "count": None,
-                    "table": None,
+                    "tables": sorted(set(tables)),
+                    "rows": rows,
+                    "count": total_count if total_count is not None else len(rows),
+                    "table": rows_table,
                 }
 
             logger.info(
@@ -145,6 +158,35 @@ def run_agent_question(
                 except Exception as e:
                     output = f"Error: {e}"
                     logger.error("AGENT tool %s raised: %s", tc["name"], e)
+
+                # Capture structured results so the client can render real
+                # rows. `list_tables` also returns a list, so the tool name
+                # is what keeps it out of `rows`.
+                tool_name = tc["name"]
+                if tool_name in ("run_sql_query", "sample_rows") and isinstance(output, list):
+                    rows = [r for r in output if isinstance(r, dict)]
+                    # Only sample_rows names its table explicitly. run_sql_query
+                    # takes a raw query, and guessing the table out of the SQL
+                    # would risk naming the wrong one — so leave it unset.
+                    if tool_name == "sample_rows":
+                        name = args.get("table_name")
+                        rows_table = str(name) if name else None
+                elif tool_name == "count_rows" and isinstance(output, int):
+                    total_count = output
+                elif tool_name == "list_tables" and isinstance(output, list):
+                    # The tool returns the table names themselves, so this is
+                    # the only way the client learns them.
+                    tables.extend(str(t) for t in output if isinstance(t, str))
+                if tool_name in (
+                    "list_tables",
+                    "describe_table",
+                    "sample_rows",
+                    "run_sql_query",
+                ):
+                    table_name = args.get("table_name")
+                    if table_name:
+                        tables.append(str(table_name))
+
                 trace.append(
                     {
                         "name": tc["name"],
@@ -160,10 +202,10 @@ def run_agent_question(
             "type": "answer",
             "answer": ai_msg.content or "Could not determine a final answer.",
             "toolCalls": trace,
-            "tables": [],
-            "rows": [],
-            "count": None,
-            "table": None,
+            "tables": sorted(set(tables)),
+            "rows": rows,
+            "count": total_count if total_count is not None else len(rows),
+            "table": rows_table,
         }
 
     except Exception as e:

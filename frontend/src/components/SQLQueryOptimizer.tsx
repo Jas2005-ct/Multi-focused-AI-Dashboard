@@ -2,20 +2,8 @@ import { useState } from 'react'
 import { aiQuery } from '../api/dashboardapi'
 import { getErrorMessage, type ApiEnvelope } from '../api/types'
 import type { ActiveConnection } from '../types/connection'
-
-/** A single row returned by the agent's read-only tools. */
-type AnswerRow = Record<string, unknown>
-
-/** Payload carried in the `data` field of the v1 AI query envelope. */
-interface AiQueryData {
-  type: 'query' | 'answer'
-  sql?: string
-  answer?: string
-  tables?: string[]
-  rows?: AnswerRow[]
-  count?: number | null
-  toolCalls?: { name: string; args: Record<string, unknown> }[]
-}
+import type { AiQueryData, AnswerRow } from '../types/answer'
+import ResultTable from './ResultTable'
 
 function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
   const [sentence, setSentence] = useState('')
@@ -24,6 +12,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
   const [answerTables, setAnswerTables] = useState<string[]>([])
   const [answerRows, setAnswerRows] = useState<AnswerRow[]>([])
   const [answerCount, setAnswerCount] = useState<number | null>(null)
+  const [answerTable, setAnswerTable] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -35,6 +24,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
     setAnswerTables([])
     setAnswerRows([])
     setAnswerCount(null)
+    setAnswerTable(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -74,6 +64,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
         setAnswerTables(data.tables || [])
         setAnswerRows(data.rows || [])
         setAnswerCount(data.count ?? null)
+        setAnswerTable(data.table ?? null)
         setOptimizedQuery('')
       } else {
         setOptimizedQuery(data.sql || '')
@@ -81,6 +72,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
         setAnswerTables([])
         setAnswerRows([])
         setAnswerCount(null)
+        setAnswerTable(null)
       }
       setSuccess(true)
     } catch (err: unknown) {
@@ -241,31 +233,22 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
           <div style={styles.resultSection}>
             <div style={styles.codeHeader}>
               <span style={styles.codeLabel}>Answer</span>
-              {answerCount !== null && <span style={styles.countBadge}>{answerCount} row(s)</span>}
+              {/* When rows are present, ResultTable owns the count — showing
+                  it here too would duplicate it. */}
+              {answerCount !== null && answerRows.length === 0 && (
+                <span style={styles.countBadge}>
+                  {answerCount.toLocaleString()} row(s)
+                </span>
+              )}
             </div>
             <div style={styles.answerBlock}>
               <p style={styles.answerText}>{answer}</p>
               {answerRows.length > 0 && (
-                <div style={styles.rowsTableWrap}>
-                  <table style={styles.rowsTable}>
-                    <thead>
-                      <tr>
-                        {Object.keys(answerRows[0] || {}).map((h) => (
-                          <th key={h} style={styles.th}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {answerRows.map((row, idx) => (
-                        <tr key={idx}>
-                          {Object.values(row).map((v: unknown, i) => (
-                            <td key={i} style={styles.td}>{String(v ?? '')}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ResultTable
+                  rows={answerRows}
+                  total={answerCount}
+                  table={answerTable}
+                />
               )}
               {answerTables.length > 0 && answerRows.length === 0 && (
                 <div style={styles.tablesList}>
@@ -469,9 +452,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   answerText: {
     color: '#e0e7ff',
+    fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     fontSize: '14px',
     lineHeight: '1.6',
     margin: 0,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
   },
   countBadge: {
     background: 'rgba(102,126,234,0.2)',
@@ -480,35 +466,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '20px',
     fontSize: '11px',
     fontWeight: 600,
-  },
-  rowsTableWrap: {
-    overflow: 'auto',
-    borderRadius: '8px',
-    border: '1px solid rgba(255,255,255,0.08)',
-    maxHeight: '300px',
-  },
-  rowsTable: {
-    width: '100%',
-    borderCollapse: 'collapse' as const,
-    fontSize: '12px',
-  },
-  th: {
-    background: 'rgba(0,0,0,0.2)',
-    color: '#b8b8d0',
-    padding: '8px 12px',
-    textAlign: 'left' as const,
-    fontWeight: 600,
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
-    whiteSpace: 'nowrap' as const,
-  },
-  td: {
-    padding: '8px 12px',
-    color: '#e0e7ff',
-    borderBottom: '1px solid rgba(255,255,255,0.05)',
-    maxWidth: '200px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
   },
   connectionInfo: {
     padding: '16px',
