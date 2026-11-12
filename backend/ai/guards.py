@@ -40,6 +40,10 @@ def validate_sql_ast(sql: str) -> Tuple[bool, str]:
         # Must be SELECT or WITH (CTE)
         if not isinstance(stmt, (exp.Select, exp.With)):
             # Check for write operations
+            # NOTE: sqlglot spells it `TruncateTable`; `exp.Truncate` does
+            # not exist and raised AttributeError here, which the generic
+            # handler below turned into a confusing "Validation error"
+            # instead of the read-only message.
             write_types = (
                 exp.Insert,
                 exp.Update,
@@ -47,7 +51,7 @@ def validate_sql_ast(sql: str) -> Tuple[bool, str]:
                 exp.Create,
                 exp.Alter,
                 exp.Drop,
-                exp.Truncate,
+                exp.TruncateTable,
                 exp.Merge,
             )
             if isinstance(stmt, write_types):
