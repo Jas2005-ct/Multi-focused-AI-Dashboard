@@ -4,19 +4,22 @@ import secrets
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "300"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 
+# (otp, expiry_timestamp, attempts)
+OTPEntry = Tuple[str, float, int]
+
 
 class OTPStore(ABC):
     @abstractmethod
     def save(self, email: str, otp: str) -> None: ...
     @abstractmethod
-    def get(self, email: str) -> Optional[Tuple[str, float, int]]:
+    def get(self, email: str) -> Optional[OTPEntry]:
         """Returns (otp, expiry_timestamp, attempts) or None"""
 
     @abstractmethod
@@ -29,7 +32,7 @@ class MemoryOTPStore(OTPStore):
     """Dev: in-process dict + Lock. Not shared across workers."""
 
     def __init__(self):
-        self._store: dict = {}
+        self._store: Dict[str, OTPEntry] = {}
         self._lock = threading.Lock()
 
     def save(self, email: str, otp: str) -> None:
@@ -37,7 +40,7 @@ class MemoryOTPStore(OTPStore):
         with self._lock:
             self._store[email] = (otp, expiry, 0)
 
-    def get(self, email: str) -> Optional[Tuple[str, float, int]]:
+    def get(self, email: str) -> Optional[OTPEntry]:
         with self._lock:
             entry = self._store.get(email)
             if not entry:
@@ -80,7 +83,7 @@ class RedisOTPStore(OTPStore):
         # value = otp:attempts, TTL handles expiry
         self.r.setex(self._key(email), OTP_TTL_SECONDS, f"{otp}:0")
 
-    def get(self, email: str) -> Optional[Tuple[str, float, int]]:
+    def get(self, email: str) -> Optional[OTPEntry]:
         val = self.r.get(self._key(email))
         if not val:
             return None

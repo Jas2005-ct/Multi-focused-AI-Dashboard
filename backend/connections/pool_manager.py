@@ -15,6 +15,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import QueuePool
 
+from connections.payloads import PoolStats, TestConnectionResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,7 +160,9 @@ class ConnectionPoolManager:
         finally:
             conn.close()
 
-    def test_connection(self, user_id: int, db_id: int, connection_string: str) -> dict:
+    def test_connection(
+        self, user_id: int, db_id: int, connection_string: str
+    ) -> TestConnectionResult:
         """Test a database connection."""
         try:
             with self.get_connection(user_id, db_id, connection_string) as conn:
@@ -188,7 +192,7 @@ class ConnectionPoolManager:
                 self._pools.pop(user_id)
                 logger.info(f"Closed all pools for user {user_id}")
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> PoolStats:
         """Get pool statistics for monitoring."""
         with self._lock:
             total = sum(len(p) for p in self._pools.values())

@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 
+from ai.payloads import UsageSummary
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ class LLMUsageTracker:
         self.total_completion_tokens += completion_tokens
         self.total_requests += 1
 
-    def get_summary(self) -> dict:
+    def get_summary(self) -> UsageSummary:
         return {
             "total_requests": self.total_requests,
             "total_prompt_tokens": self.total_prompt_tokens,

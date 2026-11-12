@@ -5,7 +5,7 @@ Business logic for DB connection CRUD, validation, and schema introspection.
 
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 from sqlalchemy import text
@@ -13,13 +13,23 @@ from sqlalchemy import text
 from auths.models import db
 from connections.crypto import crypto
 from connections.model import DBConnection
+from connections.payloads import (
+    ColumnSchema,
+    ConnectionDetail,
+    ConnectionPage,
+    ConnectionSummary,
+    FullSchema,
+    ParsedConnection,
+    TableSchema,
+    TestConnectionResult,
+)
 from connections.pool_manager import connection_pool
 
-_SCHEMA_CACHE: Dict[Tuple[int, int], Tuple[float, Dict[str, Any]]] = {}
+_SCHEMA_CACHE: Dict[Tuple[int, int], Tuple[float, FullSchema]] = {}
 _SCHEMA_CACHE_TTL = 300  # 5 minutes
 
 
-def get_cached_schema(user_id: int, db_id: int) -> Optional[Dict[str, Any]]:
+def get_cached_schema(user_id: int, db_id: int) -> Optional[FullSchema]:
     entry = _SCHEMA_CACHE.get((user_id, db_id))
     if not entry:
         return None
@@ -30,7 +40,7 @@ def get_cached_schema(user_id: int, db_id: int) -> Optional[Dict[str, Any]]:
     return data
 
 
-def set_cached_schema(user_id: int, db_id: int, data: Dict[str, Any]) -> None:
+def set_cached_schema(user_id: int, db_id: int, data: FullSchema) -> None:
     _SCHEMA_CACHE[(user_id, db_id)] = (time.time() + _SCHEMA_CACHE_TTL, data)
 
 
@@ -38,7 +48,7 @@ def invalidate_schema_cache(user_id: int, db_id: int) -> None:
     _SCHEMA_CACHE.pop((user_id, db_id), None)
 
 
-def parse_connection_string(connection_string: str) -> dict:
+def parse_connection_string(connection_string: str) -> ParsedConnection:
     """Parse a database connection string into individual components."""
     try:
         parsed = urlparse(connection_string)
@@ -153,31 +163,42 @@ def save_connection(
     return new_conn
 
 
-def list_connections(user_id: int, page: int = 1, per_page: int = 20):
+def _to_summary(conn: DBConnection) -> ConnectionSummary:
+    """Read an ORM row into a plain dict, without secrets.
+
+    The model's attributes are plain Python values at runtime, but they are
+    declared with ``db.Column``, which a type checker reads as ``Column[str]``
+    rather than ``str``. The casts bridge that gap in one place, so both
+    callers of this helper stay clean.
+    """
+    created_at = cast(Optional[datetime], conn.created_at)
+    last_used = cast(Optional[datetime], conn.last_used)
+    return {
+        "id": cast(int, conn.id),
+        "name": cast(Optional[str], conn.name),
+        "host": cast(str, conn.host),
+        "port": cast(int, conn.port),
+        "database": cast(str, conn.database),
+        "username": cast(str, conn.username),
+        "db_type": cast(str, conn.db_type),
+        "sslmode": cast(Optional[str], conn.sslmode),
+        "created_at": created_at.isoformat() if created_at else None,
+        "last_used": last_used.isoformat() if last_used else None,
+    }
+
+
+def list_connections(user_id: int, page: int = 1, per_page: int = 20) -> ConnectionPage:
     """Paginated list of connections for a user."""
     pagination = DBConnection.query.filter_by(user_id=user_id).paginate(
         page=page, per_page=per_page, error_out=False
     )
+    connections: List[ConnectionSummary] = [_to_summary(c) for c in pagination.items]
     return {
         "page": page,
         "per_page": per_page,
         "total": pagination.total,
         "pages": pagination.pages,
-        "connections": [
-            {
-                "id": c.id,
-                "name": c.name,
-                "host": c.host,
-                "port": c.port,
-                "database": c.database,
-                "username": c.username,
-                "db_type": c.db_type,
-                "sslmode": c.sslmode,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-                "last_used": c.last_used.isoformat() if c.last_used else None,
-            }
-            for c in pagination.items
-        ],
+        "connections": connections,
     }
 
 
@@ -189,7 +210,7 @@ def get_connection(user_id: int, db_id: int) -> Optional[DBConnection]:
     return conn
 
 
-def get_connection_with_tables(user_id: int, db_id: int) -> Optional[dict]:
+def get_connection_with_tables(user_id: int, db_id: int) -> Optional[ConnectionDetail]:
     """Get connection details with table list."""
     conn = get_connection(user_id, db_id)
     if not conn:
@@ -201,22 +222,11 @@ def get_connection_with_tables(user_id: int, db_id: int) -> Optional[dict]:
         raise ConnectionError(test["message"])
 
     tables = get_tables(user_id, db_id, conn_str)
-    return {
-        "id": conn.id,
-        "name": conn.name,
-        "host": conn.host,
-        "port": conn.port,
-        "database": conn.database,
-        "username": conn.username,
-        "db_type": conn.db_type,
-        "sslmode": conn.sslmode,
-        "created_at": conn.created_at.isoformat() if conn.created_at else None,
-        "last_used": conn.last_used.isoformat() if conn.last_used else None,
-        "tables": tables,
-    }
+    detail: ConnectionDetail = {**_to_summary(conn), "tables": tables}
+    return detail
 
 
-def test_connection(user_id: int, db_id: int) -> dict:
+def test_connection(user_id: int, db_id: int) -> TestConnectionResult:
     """Test a saved connection."""
     conn = get_connection(user_id, db_id)
     if not conn:
@@ -274,7 +284,9 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
         return [row[0] for row in result]
 
 
-def get_table_schema(user_id: int, db_id: int, connection_string: str, table_name: str) -> dict:
+def get_table_schema(
+    user_id: int, db_id: int, connection_string: str, table_name: str
+) -> TableSchema:
     """Get schema for a specific table."""
     with connection_pool.get_connection(user_id, db_id, connection_string) as conn:
         if connection_string.startswith(("postgresql://", "postgres://")):
@@ -291,13 +303,13 @@ def get_table_schema(user_id: int, db_id: int, connection_string: str, table_nam
             ORDER BY ordinal_position
         """)
         result = conn.execute(query, {"table_name": table_name})
-        columns = [
+        columns: List[ColumnSchema] = [
             {"name": r[0], "type": r[1], "nullable": r[2] == "YES", "default": r[3]} for r in result
         ]
     return {"table_name": table_name, "columns": columns}
 
 
-def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[str, Any]:
+def get_full_schema(user_id: int, db_id: int, connection_string: str) -> FullSchema:
     """Get full database schema with all tables and columns in a single batch query."""
     cached = get_cached_schema(user_id, db_id)
     if cached is not None:
@@ -318,7 +330,7 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[st
             ORDER BY table_name, ordinal_position
         """)
         result = conn.execute(query)
-        tables_dict: Dict[str, List[Dict[str, Any]]] = {}
+        tables_dict: Dict[str, List[ColumnSchema]] = {}
         for row in result:
             t_name, col_name, data_type, is_null, col_default = (
                 row[0],
@@ -338,14 +350,14 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> Dict[st
                 }
             )
 
-    full_schema = {
+    full_schema: FullSchema = {
         "tables": [{"table_name": t, "columns": cols} for t, cols in tables_dict.items()]
     }
     set_cached_schema(user_id, db_id, full_schema)
     return full_schema
 
 
-def format_schema_for_llm(schema: Dict[str, Any], max_chars: int = 4000) -> str:
+def format_schema_for_llm(schema: FullSchema, max_chars: int = 4000) -> str:
     """
     Format database schema for inclusion in LLM prompt, capped to max_chars.
 

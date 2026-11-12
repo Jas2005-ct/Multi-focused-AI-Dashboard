@@ -11,8 +11,11 @@ Token model:
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import jwt
+
+from auths.payloads import AccessTokenPayload, RefreshTokenPayload, TokenPair
 
 ACCESS_TTL = timedelta(minutes=15)
 REFRESH_TTL = timedelta(days=7)
@@ -22,7 +25,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def issue_pair(user, secret: str) -> dict:
+def issue_pair(user, secret: str) -> TokenPair:
     """Return ``{"token", "refreshToken", "jti"}`` for a user row."""
     jti = uuid.uuid4().hex
     access = jwt.encode(
@@ -43,9 +46,10 @@ def issue_pair(user, secret: str) -> dict:
     return {"token": access, "refreshToken": refresh, "jti": jti}
 
 
-def decode_access(token: str, secret: str) -> dict:
+def decode_access(token: str, secret: str) -> AccessTokenPayload:
     """Decode an access token; legacy typ-less tokens still accepted."""
-    payload = jwt.decode(token, secret, algorithms=["HS256"])
+    claims = jwt.decode(token, secret, algorithms=["HS256"])
+    payload = cast(AccessTokenPayload, claims)
     if payload.get("typ") not in (None, "access"):
         raise jwt.InvalidTokenError("not an access token")
     if not payload.get("user_id"):
@@ -53,8 +57,9 @@ def decode_access(token: str, secret: str) -> dict:
     return payload
 
 
-def decode_refresh(token: str, secret: str) -> dict:
-    payload = jwt.decode(token, secret, algorithms=["HS256"])
+def decode_refresh(token: str, secret: str) -> RefreshTokenPayload:
+    claims = jwt.decode(token, secret, algorithms=["HS256"])
+    payload = cast(RefreshTokenPayload, claims)
     if payload.get("typ") != "refresh" or not payload.get("jti"):
         raise jwt.InvalidTokenError("not a refresh token")
     if not payload.get("user_id"):

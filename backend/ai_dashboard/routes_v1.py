@@ -108,23 +108,23 @@ def ai_query_v1(body: AIQueryRequest):
 
         if body.mode == "sql":
             # Direct LCEL chain for SQL generation
-            result = lcel_get_query_format(
+            chain_result = lcel_get_query_format(
                 body.query,
                 schema_context=schema_context,
             )
-            if "error" in result:
-                error_type = result.get("error_type")
+            if "error" in chain_result:
+                error_type = chain_result.get("error_type")
                 status_code = (
                     500
                     if error_type == "api_error"
                     else (401 if error_type == "auth_error" else 400)
                 )
-                return error_response(result["error"], status=status_code)
+                return error_response(chain_result["error"], status=status_code)
             return success_response(
                 {
                     "type": "query",
-                    "sql": result.get("sql") or result.get("output_query"),
-                    "metadata": result.get("metadata", {}),
+                    "sql": chain_result.get("sql") or chain_result.get("output_query"),
+                    "metadata": chain_result.get("metadata", {}),
                 }
             )
 

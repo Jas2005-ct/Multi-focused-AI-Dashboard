@@ -6,12 +6,13 @@ Uses Pydantic models for arguments and returns JSON-serializable results.
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import List
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from ai.guards import sanitize_table_name
+from ai.payloads import FullSchema, Row, TableSchema
 from auths.models import db
 from connections.model import DBConnection
 from connections.service import (
@@ -90,7 +91,7 @@ def _list_tables_impl(args: ListTablesArgs) -> List[str]:
     return svc_get_tables(args.user_id, args.db_id, conn.get_decrypted_connection_string())
 
 
-def _describe_table_impl(args: DescribeTableArgs) -> Dict[str, Any]:
+def _describe_table_impl(args: DescribeTableArgs) -> TableSchema:
     table = sanitize_table_name(args.table_name)
     conn = _resolve_connection(args.user_id, args.db_id)
     return svc_get_table_schema(
@@ -98,7 +99,7 @@ def _describe_table_impl(args: DescribeTableArgs) -> Dict[str, Any]:
     )
 
 
-def _sample_rows_impl(args: SampleRowsArgs) -> List[Dict[str, Any]]:
+def _sample_rows_impl(args: SampleRowsArgs) -> List[Row]:
     table = sanitize_table_name(args.table_name)
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
@@ -147,12 +148,12 @@ def _count_rows_impl(args: CountRowsArgs) -> int:
         return int(result.scalar() or 0)
 
 
-def _get_full_schema_impl(args: GetFullSchemaArgs) -> Dict[str, Any]:
+def _get_full_schema_impl(args: GetFullSchemaArgs) -> FullSchema:
     conn = _resolve_connection(args.user_id, args.db_id)
     return svc_get_full_schema(args.user_id, args.db_id, conn.get_decrypted_connection_string())
 
 
-def _run_sql_impl(args: RunSQLArgs) -> List[Dict[str, Any]]:
+def _run_sql_impl(args: RunSQLArgs) -> List[Row]:
     # Validate SQL safety
     from ai.guards import validate_sql_ast
 

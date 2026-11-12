@@ -6,12 +6,13 @@ Falls back to LCEL SQL chain if model lacks tool support.
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import List, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from ai.guards import is_write_intent
 from ai.llm_factory import get_llm
+from ai.payloads import RouterResult, Row, ToolCallTrace
 from ai.tools.introspection import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def run_agent_question(
     user_id: int,
     db_id: int,
     schema_context: str = "",
-) -> Dict[str, Any]:
+) -> RouterResult:
     """Run the ReAct agent for a free-form DB question.
 
     Returns:
@@ -93,13 +94,13 @@ def run_agent_question(
 
     # Build tool map
     tool_map = {t.name: t for t in ALL_TOOLS}
-    trace: List[Dict[str, Any]] = []
+    trace: List[ToolCallTrace] = []
 
     # Structured results captured from the tools. Without these the answer
     # reaches the client as prose only, and the model has to re-type the rows
     # into a markdown table — which is lossy and unreadable. The API contract
     # (rows / count / tables) has always been there; this fills it in.
-    rows: List[Dict[str, Any]] = []
+    rows: List[Row] = []
     rows_table: str | None = None
     total_count: int | None = None
     tables: List[str] = []
@@ -124,20 +125,24 @@ def run_agent_question(
             tool_calls = getattr(ai_msg, "tool_calls", None)
             if not tool_calls:
                 # Model is done calling tools -> final natural-language answer
+                # AIMessage.content is typed as str | list (multimodal), but
+                # this chain only ever produces text.
+                answer = cast(str, ai_msg.content or "")
                 logger.info(
                     "AGENT ROUND %d — LLM returned final answer (%d chars), no tool calls",
                     step,
-                    len(ai_msg.content or ""),
+                    len(answer),
                 )
-                return {
+                final: RouterResult = {
                     "type": "answer",
-                    "answer": ai_msg.content or "",
+                    "answer": answer,
                     "toolCalls": trace,
                     "tables": sorted(set(tables)),
                     "rows": rows,
                     "count": total_count if total_count is not None else len(rows),
                     "table": rows_table,
                 }
+                return final
 
             logger.info(
                 "AGENT ROUND %d — LLM requested %d tool call(s): %s",
@@ -198,15 +203,16 @@ def run_agent_question(
 
         # Exceeded max iterations
         logger.warning("AGENT exceeded max iterations")
-        return {
+        exhausted: RouterResult = {
             "type": "answer",
-            "answer": ai_msg.content or "Could not determine a final answer.",
+            "answer": cast(str, ai_msg.content or "Could not determine a final answer."),
             "toolCalls": trace,
             "tables": sorted(set(tables)),
             "rows": rows,
             "count": total_count if total_count is not None else len(rows),
             "table": rows_table,
         }
+        return exhausted
 
     except Exception as e:
         logger.warning(
@@ -215,7 +221,7 @@ def run_agent_question(
         )
         from ai.agents.sql_chain import get_query_format as lcel_get_query_format
 
-        res = lcel_get_query_format(sentence, schema_context=schema_context)
+        res: RouterResult = lcel_get_query_format(sentence, schema_context=schema_context)
         if "sql" in res:
             res["type"] = "query"
         res["toolCalls"] = trace

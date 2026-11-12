@@ -15,6 +15,7 @@ from langchain_core.runnables import RunnableLambda
 
 from ai.guards import add_safety_limits, validate_sql_ast
 from ai.llm_factory import get_llm
+from ai.payloads import RouterResult
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ def _get_sql_chain():
 def get_query_format(
     sentence: Any,
     schema_context: str | None = None,
-) -> dict[str, Any]:
+) -> RouterResult:
     """Convert natural language to SQL using LCEL chain.
 
     Args:
