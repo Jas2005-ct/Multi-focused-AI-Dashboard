@@ -45,14 +45,18 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
-    # LLM providers (resolution + fallbacks live in ai_dashboard.chains.llm)
-    API_KEY_PROVIDER: str = "OPEN_ZEN"
+    # LLM providers (resolution + fallbacks live in ai.llm_factory)
+    # Default to Groq (user-provided key); override with API_KEY_PROVIDER env var.
+    API_KEY_PROVIDER: str = "GROQ"
     OPEN_ROUTER_API_KEY: str = ""
-    OPEN_ROUTER_MODEL: str = "nvidia/nemotron-3.5-lightning:free"
+    OPEN_ROUTER_MODEL: str = "liquid/lfm-2.5-2.6b:free"
     OPEN_ROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPEN_ZEN_API_KEY: str = ""
     OPEN_ZEN_MODEL: str = "minimax-m3"
     OPEN_ZEN_BASE_URL: str = "https://opencode.ai/zen/v1"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
     # OTP / email / workers
     OTP_BACKEND: str = ""

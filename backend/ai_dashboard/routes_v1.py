@@ -119,7 +119,7 @@ def ai_query_v1(body: AIQueryRequest):
                     if error_type == "api_error"
                     else (401 if error_type == "auth_error" else 400)
                 )
-                return error_response(result["error"], status_code=status_code)
+                return error_response(result["error"], status=status_code)
             return success_response(
                 {
                     "type": "query",
@@ -141,7 +141,7 @@ def ai_query_v1(body: AIQueryRequest):
             status_code = (
                 500 if error_type == "api_error" else (401 if error_type == "auth_error" else 400)
             )
-            return error_response(result["error"], status_code=status_code)
+            return error_response(result["error"], status=status_code)
 
         if result.get("type") == "answer":
             return success_response(

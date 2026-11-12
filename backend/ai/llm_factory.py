@@ -44,6 +44,17 @@ _REGISTRY: dict[str, ProviderConfig] = {
             get_settings().OPEN_ROUTER_BASE_URL,
         ),
     ),
+    "groq": ProviderConfig(
+        name="Groq",
+        env_prefix="GROQ",
+        fallback_prefix=None,
+        aliases={"GROQ"},
+        defaults=(
+            get_settings().GROQ_API_KEY,
+            get_settings().GROQ_MODEL,
+            get_settings().GROQ_BASE_URL,
+        ),
+    ),
 }
 
 _ALIAS_TO_KEY: dict[str, str] = {
@@ -63,12 +74,11 @@ def _resolve_env(prefix: str, fallback_prefix: Optional[str], suffix: str, defau
 
 
 def get_provider_config(provider: Optional[str] = None) -> Tuple[str, str, str, str]:
-    active_provider = (provider or get_settings().API_KEY_PROVIDER or "OPEN_ZEN").strip().upper()
-
+    active_provider = (provider or get_settings().API_KEY_PROVIDER or "GROQ").strip().upper()
     key = _ALIAS_TO_KEY.get(active_provider)
     if key is None:
-        logger.warning(f"Unknown API_KEY_PROVIDER '{active_provider}'. Defaulting to OPEN_ZEN.")
-        key = "zen"
+        logger.warning("Unknown API_KEY_PROVIDER '%s'. Defaulting to GROQ.", active_provider)
+        key = "groq"
 
     cfg = _REGISTRY[key]
     api_key = _resolve_env(cfg.env_prefix, cfg.fallback_prefix, "API_KEY", cfg.defaults[0])
@@ -145,7 +155,8 @@ def get_llm(
     if not api_key:
         raise ValueError(
             f"API key for provider '{provider_name}' is not set. "
-            f"Please configure OPEN_ZEN_API_KEY or OPEN_ROUTER_API_KEY in your .env file."
+            f"Please configure the corresponding *_API_KEY in your .env file "
+            f"(e.g. GROQ_API_KEY, OPEN_ROUTER_API_KEY, OPEN_ZEN_API_KEY)."
         )
 
     logger.info(

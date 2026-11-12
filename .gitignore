@@ -42,6 +42,7 @@ instance/
 .opencode/
 AGENT.md
 .cursor/
+docs/
 
 # Env variants
 .env.*
