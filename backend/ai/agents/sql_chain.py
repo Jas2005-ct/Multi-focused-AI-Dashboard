@@ -5,6 +5,7 @@ Keeps old chain as fallback for learning purposes.
 """
 
 import logging
+import re
 from typing import Any
 
 from langchain_core.exceptions import OutputParserException
@@ -18,16 +19,47 @@ from ai.llm_factory import get_llm
 logger = logging.getLogger(__name__)
 
 
+def extract_sql(text: str) -> str:
+    """Extract a single SQL statement from LLM output.
+
+    Models sometimes wrap SQL in markdown fences or prepend explanations.
+    The validator/parser expects raw SQL, so normalize before safety checks.
+    """
+    if not text:
+        return ""
+    cleaned = text.strip()
+
+    # Prefer content from a fenced code block (```sql ... ``` or ``` ... ```).
+    fence = re.search(
+        r"```(?:sql|postgresql|postgres)?\s*\n?(.*?)```",
+        cleaned,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if fence:
+        cleaned = fence.group(1).strip()
+
+    # If prose remains before the statement, keep from first SELECT/WITH.
+    match = re.search(r"\b(SELECT|WITH)\b", cleaned, re.IGNORECASE)
+    if match and match.start() > 0:
+        logger.debug("Stripping %d chars of prose before SQL", match.start())
+        cleaned = cleaned[match.start() :].strip()
+
+    # Remove a stray trailing fence.
+    cleaned = re.sub(r"```\s*$", "", cleaned).strip()
+    return cleaned
+
+
 SQL_SYSTEM_TEMPLATE = """You are an expert PostgreSQL SQL Query Compiler.
 
 Convert the user request into a single valid, optimized PostgreSQL query.
 
 RULES:
-1. Output must be valid PostgreSQL syntax and production-safe.
-2. If aggregation is required, always use proper GROUP BY.
-3. Use explicit column names whenever possible; avoid SELECT *.
-4. Preserve exact table and column names provided by the user.
-5. Generate optimized queries whenever possible.
+1. Output ONLY the SQL statement. No markdown, no code fences, no explanation, no preamble.
+2. Output must be valid PostgreSQL syntax and production-safe.
+3. If aggregation is required, always use proper GROUP BY.
+4. Use explicit column names whenever possible; avoid SELECT *.
+5. Use ONLY table and column names that appear in the schema context. Never invent identifiers.
+6. Generate optimized queries whenever possible.
 
 DATABASE SCHEMA CONTEXT (may be empty):
 {schema_context}"""
@@ -43,12 +75,19 @@ sql_prompt = ChatPromptTemplate.from_messages(
 
 
 def _safety_gate(sql: str) -> str:
-    """Final chain step: reject unsafe SQL before it reaches callers."""
-    is_safe, error_msg = validate_sql_ast(sql)
+    """Final chain step: normalize, reject unsafe SQL, and apply safety limits."""
+    cleaned = extract_sql(sql)
+    if cleaned != (sql or "").strip():
+        logger.info("Normalized LLM SQL output before validation")
+    is_safe, error_msg = validate_sql_ast(cleaned)
     if not is_safe:
-        logger.warning(f"Potentially unsafe SQL detected: {error_msg}")
+        logger.warning(
+            "Potentially unsafe SQL detected: %s | raw_preview=%r",
+            error_msg,
+            (sql or "")[:200],
+        )
         raise ValueError(error_msg)
-    return add_safety_limits(sql)
+    return add_safety_limits(cleaned)
 
 
 def _get_sql_chain():
