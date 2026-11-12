@@ -117,6 +117,10 @@ def test_agent_injects_session_params_into_tool_call(app_client, seeded_connecti
     assert "Error:" not in str(call["result"])
     assert "users" in str(call["result"])
 
+    # The table names must reach the client: list_tables is the only source
+    # of them, and the UI renders them as tags.
+    assert result["tables"] == ["orders", "users"]
+
 
 def test_agent_blocks_write_intent_without_llm(_fresh_settings):
     """Write-intent sentences are refused deterministically, before any LLM call."""
@@ -128,3 +132,114 @@ def test_agent_blocks_write_intent_without_llm(_fresh_settings):
     assert result["type"] == "answer"
     assert "read-only" in result["answer"].lower()
     assert result["toolCalls"] == []
+
+
+class _FakeTool:
+    """Stand-in for a StructuredTool with a canned result.
+
+    The agent builds its tool map from `react_agent.ALL_TOOLS`, which is bound
+    at import time, so the module-level tools cannot be swapped by patching
+    `ai.tools.introspection` — this replaces the map's contents instead.
+    """
+
+    def __init__(self, name: str, result):
+        self.name = name
+        self._result = result
+
+    def invoke(self, args):
+        return self._result
+
+
+def test_agent_returns_structured_rows_from_query_tool(app_client, seeded_connection, monkeypatch):
+    """The agent must surface the rows it fetched, not only prose.
+
+    Historical behaviour: `rows` / `count` / `tables` were hard-coded empty on
+    the agent path, so the UI had nothing to render and the model had to
+    re-type the rows into a markdown table inside its answer.
+    """
+    from ai.agents import react_agent
+
+    user_id, db_id = seeded_connection
+
+    scripted = _ScriptedLLM(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "run_sql_query",
+                        "args": {"query": "SELECT id, name FROM users"},
+                        "id": "c1",
+                    }
+                ],
+            ),
+            AIMessage(content="There is one user row."),
+        ]
+    )
+    monkeypatch.setattr(react_agent, "get_llm", lambda **_kw: scripted)
+    monkeypatch.setattr(react_agent, "_build_schema_context", lambda _uid, _did: "")
+    monkeypatch.setattr(
+        react_agent,
+        "ALL_TOOLS",
+        [_FakeTool("run_sql_query", [{"id": 1, "name": "jaswant"}])],
+    )
+
+    result = react_agent.run_agent_question(sentence="show the users", user_id=user_id, db_id=db_id)
+
+    assert result["type"] == "answer"
+    assert result["rows"] == [{"id": 1, "name": "jaswant"}]
+    assert result["count"] == 1
+    # run_sql_query takes a raw query, so the source table is unknown and
+    # must not be guessed.
+    assert result["table"] is None
+
+
+def test_agent_reports_table_total_separately_from_returned_rows(
+    app_client, seeded_connection, monkeypatch
+):
+    """`count_rows` is a table total; `sample_rows` is a page of rows.
+
+    The API exposes a single `count` field, so it carries the larger total and
+    the client renders "showing N of M". Returning just len(rows) would claim
+    a table with 10,000 rows has 20.
+    """
+    from ai.agents import react_agent
+
+    user_id, db_id = seeded_connection
+
+    scripted = _ScriptedLLM(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "count_rows", "args": {"table_name": "users"}, "id": "c1"},
+                    {
+                        "name": "sample_rows",
+                        "args": {"table_name": "users", "limit": 20},
+                        "id": "c2",
+                    },
+                ],
+            ),
+            AIMessage(content="There are users."),
+        ]
+    )
+    monkeypatch.setattr(react_agent, "get_llm", lambda **_kw: scripted)
+    monkeypatch.setattr(react_agent, "_build_schema_context", lambda _uid, _did: "")
+    monkeypatch.setattr(
+        react_agent,
+        "ALL_TOOLS",
+        [
+            _FakeTool("count_rows", 10_000),
+            _FakeTool("sample_rows", [{"id": i} for i in range(20)]),
+        ],
+    )
+
+    result = react_agent.run_agent_question(
+        sentence="how many users are there", user_id=user_id, db_id=db_id
+    )
+
+    assert len(result["rows"]) == 20
+    assert result["count"] == 10_000
+    assert "users" in result["tables"]
+    # sample_rows names its table, so the client can caption the table.
+    assert result["table"] == "users"
