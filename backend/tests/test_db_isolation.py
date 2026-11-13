@@ -81,3 +81,77 @@ def test_a_test_that_never_uses_the_app_still_cannot_see_the_real_database():
     uri = get_settings().DATABASE_URL
 
     assert uri.startswith("sqlite://"), f"tests must never see a real database URL (got {uri})"
+
+
+def test_writing_to_a_real_database_server_is_refused():
+    """The guard must block a write against a live database.
+
+    The URL being a SQLite string is not enough on its own: a test could
+    build its own engine from a URL it read elsewhere. This guard refuses
+    the write at the SQLAlchemy level, so the test fails loudly instead
+    of quietly reaching the developer's data.
+
+    The check has to sit at the SQLAlchemy layer. A socket-level guard
+    does not work: psycopg2 talks to libpq, a C library that opens its
+    own sockets and never touches Python's ``socket`` module - a socket
+    guard silently let a ``DROP TABLE`` through.
+    """
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+
+    with pytest.raises(RuntimeError, match="must never write to a real database"):
+        with engine.connect() as conn:
+            conn.execute(text("DROP TABLE users"))
+
+
+def test_reading_a_real_database_is_still_allowed():
+    """Reads must stay possible - only writes are forbidden.
+
+    A test may legitimately inspect a real database (checking a schema
+    filter, for instance). Blocking reads would make that verification
+    impossible for no safety gain.
+    """
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+
+    with engine.connect() as conn:
+        value = conn.execute(text("SELECT 1")).scalar()
+
+    assert value == 1
+
+
+def test_drop_all_against_a_real_database_is_refused():
+    """The incident mechanism itself must be refused.
+
+    On 2026-11-13 the fixture's ``db.drop_all()`` ran against the
+    developer's live database and removed its tables. This drops the very
+    same ORM tables, against the very same server, and the guard must stop
+    it before the first ``DROP TABLE`` reaches the database.
+    """
+    from sqlalchemy import create_engine
+
+    from auths.models import db
+
+    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+
+    with pytest.raises(RuntimeError, match="must never write to a real database"):
+        db.metadata.drop_all(engine)
+
+
+def test_create_all_against_a_real_database_is_refused():
+    """Creating tables in a real database must be refused too."""
+    from sqlalchemy import Column, Integer, create_engine
+    from sqlalchemy.orm import declarative_base
+
+    Base = declarative_base()
+
+    class Widget(Base):
+        __tablename__ = "widget_probe"
+        id = Column(Integer, primary_key=True)
+
+    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+
+    with pytest.raises(RuntimeError, match="must never write to a real database"):
+        Base.metadata.create_all(engine)
