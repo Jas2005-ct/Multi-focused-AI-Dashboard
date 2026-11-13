@@ -6,6 +6,8 @@ from typing import Tuple
 import sqlglot
 from sqlglot import exp
 
+from common.table_policy import is_table_ignored
+
 # Write intent patterns (improved over regex-only)
 _WRITE_PATTERNS = re.compile(
     r"\b(insert|update|delete|create|alter|drop|truncate|replace|upsert|merge)\b",
@@ -93,6 +95,18 @@ def validate_sql_ast(sql: str) -> Tuple[bool, str]:
             # Block comments (AST preserves them)
             if isinstance(node, exp.Comment):
                 return False, "Comments not allowed in queries"
+
+        # Reject queries that read tables hidden by policy. This is the only
+        # layer that also covers raw SQL: a table name in a SELECT never
+        # passes through the listing, so hiding the table from the listing
+        # alone would not hide its rows.
+        cte_names = {cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)}
+        for node in stmt.find_all(exp.Table):
+            table_name = node.name
+            if not table_name or table_name.lower() in cte_names:
+                continue  # a CTE or a table function, not a real table
+            if is_table_ignored(table_name):
+                return False, f"Table '{table_name}' is not accessible"
 
         return True, ""
 
