@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Result
 
 from auths.models import db
+from common.table_policy import is_table_ignored, visible_tables
 from connections.crypto import crypto
 from connections.model import DBConnection
 from connections.payloads import (
@@ -299,13 +300,19 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
             """)
         result = conn.execute(query)
         # Single-column SELECT: scalars() returns the table names directly.
-        return list(result.scalars())
+        # Tables hidden by policy are dropped here, so every consumer of the
+        # listing (the UI, the agent, the LLM schema context) sees the same
+        # set of tables.
+        return visible_tables(list(result.scalars()))
 
 
 def get_table_schema(
     user_id: int, db_id: int, connection_string: str, table_name: str
 ) -> TableSchema:
     """Get schema for a specific table."""
+    if is_table_ignored(table_name):
+        raise ValueError(f"Table '{table_name}' is not accessible")
+
     with connection_pool.get_connection(user_id, db_id, connection_string) as conn:
         if connection_string.startswith(("postgresql://", "postgres://")):
             schema_filter = "table_schema = 'public'"
@@ -357,6 +364,11 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> FullSch
         tables_dict: Dict[str, List[ColumnSchema]] = {}
         for row in _named_rows(result):
             t_name = row["table_name"]
+            # Hidden tables are dropped before the schema is cached, so the
+            # cache never holds them and the LLM never sees them in its
+            # schema context.
+            if is_table_ignored(t_name):
+                continue
             if t_name not in tables_dict:
                 tables_dict[t_name] = []
             tables_dict[t_name].append(

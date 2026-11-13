@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from ai.guards import sanitize_table_name
 from ai.payloads import FullSchema, Row, TableSchema
 from auths.models import db
+from common.table_policy import is_table_ignored
 from connections.model import DBConnection
 from connections.service import (
     connection_pool,
@@ -93,6 +94,8 @@ def _list_tables_impl(args: ListTablesArgs) -> List[str]:
 
 def _describe_table_impl(args: DescribeTableArgs) -> TableSchema:
     table = sanitize_table_name(args.table_name)
+    if is_table_ignored(table):
+        raise ValueError(f"Table '{args.table_name}' is not accessible")
     conn = _resolve_connection(args.user_id, args.db_id)
     return svc_get_table_schema(
         args.user_id, args.db_id, conn.get_decrypted_connection_string(), table
@@ -101,6 +104,8 @@ def _describe_table_impl(args: DescribeTableArgs) -> TableSchema:
 
 def _sample_rows_impl(args: SampleRowsArgs) -> List[Row]:
     table = sanitize_table_name(args.table_name)
+    if is_table_ignored(table):
+        raise ValueError(f"Table '{args.table_name}' is not accessible")
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
 
@@ -131,6 +136,8 @@ def _sample_rows_impl(args: SampleRowsArgs) -> List[Row]:
 
 def _count_rows_impl(args: CountRowsArgs) -> int:
     table = sanitize_table_name(args.table_name)
+    if is_table_ignored(table):
+        raise ValueError(f"Table '{args.table_name}' is not accessible")
     conn = _resolve_connection(args.user_id, args.db_id)
     conn_str = conn.get_decrypted_connection_string()
 

@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     OTP_EMAIL_BACKEND: str = "auto"
     EMAIL_FROM: str = "noreply@example.com"
 
+    # Tables hidden from the table listings, the AI agent and generated SQL.
+    # Comma-separated and matched case-insensitively.
+    #   IGNORED_TABLE_PREFIXES - hides every table whose name starts with one
+    #                            of the prefixes (e.g. "auth_,django_")
+    #   IGNORED_TABLES         - hides the listed tables by exact name
+    #                            (e.g. "refresh_tokens,db_connections")
+    # Empty means nothing is hidden, so a fresh deployment behaves exactly as
+    # before until the lists are filled in.
+    IGNORED_TABLE_PREFIXES: str = ""
+    IGNORED_TABLES: str = ""
+
     @field_validator("RATE_LIMIT_PER_MIN", "OTP_TTL_SECONDS", "OTP_MAX_ATTEMPTS")
     @classmethod
     def _must_be_positive(cls, v: int) -> int:
@@ -94,6 +105,16 @@ class Settings(BaseSettings):
     @property
     def allowed_origin_list(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def ignored_table_prefixes(self) -> list[str]:
+        """Table-name prefixes that are hidden from listings and the agent."""
+        return [p.strip().lower() for p in self.IGNORED_TABLE_PREFIXES.split(",") if p.strip()]
+
+    @property
+    def ignored_tables(self) -> list[str]:
+        """Exact table names that are hidden from listings and the agent."""
+        return [t.strip().lower() for t in self.IGNORED_TABLES.split(",") if t.strip()]
 
     def ensure_secret_key(self) -> str:
         """Return an effective Flask secret, failing fast in production."""
