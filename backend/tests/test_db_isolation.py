@@ -51,3 +51,33 @@ def test_poisoned_settings_cache_cannot_redirect_the_app(poisoned_cache, app_cli
     """
     app, _ = app_client
     _assert_throwaway_sqlite(app)
+
+
+def test_app_built_outside_the_fixture_also_uses_sqlite():
+    """An app built without the app_client fixture must still be on SQLite.
+
+    Several tests build the app themselves - the config tests and the
+    OAuth-reload test do - and those never go through ``app_client``. The
+    session-wide hermetic fixture is what covers them: without it they
+    would be configured against the developer's own database.
+    """
+    from app import create_app
+
+    app = create_app()
+    uri = app.config["SQLALCHEMY_DATABASE_URI"]
+
+    assert uri.startswith("sqlite://"), f"tests must never touch a real database (bound to {uri})"
+
+
+def test_a_test_that_never_uses_the_app_still_cannot_see_the_real_database():
+    """A test that only reads the settings must not learn the real URL.
+
+    This is the exact step that caused the incident: reading the settings
+    outside the fixture window cached the DATABASE_URL from the developer's
+    .env. The hermetic fixture now makes that value a throwaway file.
+    """
+    from config import get_settings
+
+    uri = get_settings().DATABASE_URL
+
+    assert uri.startswith("sqlite://"), f"tests must never see a real database URL (got {uri})"

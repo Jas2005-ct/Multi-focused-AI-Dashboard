@@ -26,6 +26,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_database_url(tmp_path, monkeypatch):
+    """Point every test at a throwaway SQLite file for the whole session.
+
+    The app factory binds to ``settings.DATABASE_URL``, which comes from the
+    environment and the developer's ``.env`` - i.e. their real database. A
+    test that builds the app outside the ``app_client`` fixture would
+    therefore be *configured* against the real database, and anything that
+    then ran a query or dropped tables would hit it.
+
+    Forcing the URL for every test makes that impossible regardless of what
+    the test does, and the settings cache is cleared so the new value is
+    picked up.
+    """
+    from config import get_settings
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'suite.db'}")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture()
 def app_client(tmp_path):
     """Fresh Flask app + file SQLite DB + test client per test."""
