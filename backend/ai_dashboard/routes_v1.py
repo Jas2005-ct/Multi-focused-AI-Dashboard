@@ -17,6 +17,7 @@ from auths.models import User, db
 from common.responses import error_response, success_response
 from connections.model import DBConnection
 from connections.service import (
+    DemoDatabaseNotConfigured,
     delete_connection,
     format_schema_for_llm,
     get_connection,
@@ -26,6 +27,7 @@ from connections.service import (
     get_tables,
     list_connections,
     save_connection,
+    save_demo_connection,
     test_connection,
 )
 from security.dec import require_auth
@@ -222,6 +224,53 @@ def create_connection_v1(body: DBConnectionRequest):
     except Exception:
         logger.exception("Failed to save connection")
         return error_response("Failed to save connection", status=500)
+
+
+@v1.post(
+    "/connections/demo",
+    tags=[conn_tags],
+    summary="Add the shared demo database",
+    responses={
+        200: {"description": "Demo database attached"},
+        400: {"description": "Bad request - the configured demo URL is unusable"},
+        401: {"description": "Unauthorized"},
+        503: {"description": "No demo database configured on this deployment"},
+    },
+)
+@require_auth
+def add_demo_connection_v1():
+    """Attach the shared demo database to the authenticated user.
+
+    The demo database holds synthetic e-commerce data, so a visitor can
+    try the assistant without connecting a database of their own. Calling
+    it again returns the connection that already exists.
+    """
+    try:
+        conn, created = save_demo_connection(g.user_id)
+    except DemoDatabaseNotConfigured:
+        return error_response("No demo database is configured on this deployment.", status=503)
+    except ValueError as e:
+        return error_response(str(e), status=400)
+    except Exception:
+        logger.exception("Failed to attach the demo database")
+        return error_response("Failed to attach the demo database", status=500)
+
+    return success_response(
+        {
+            "id": conn.id,
+            "name": conn.name,
+            "host": conn.host,
+            "port": conn.port,
+            "database": conn.database,
+            "username": conn.username,
+            "db_type": conn.db_type,
+            "sslmode": conn.sslmode,
+            "created_at": conn.created_at.isoformat() if conn.created_at else None,
+            "last_used": conn.last_used.isoformat() if conn.last_used else None,
+            "created": created,
+        },
+        "Demo database added" if created else "Demo database already added",
+    )
 
 
 @v1.get(

@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     RATE_LIMIT_PER_MIN: int = 60
 
+    # The shared demo database offered to visitors through the "Add demo
+    # database" button. It holds synthetic e-commerce data only, and the
+    # account it points at is read-only.
+    #
+    # Empty disables the feature: the button is hidden and the endpoint
+    # answers 503. This is a deployment setting - the credentials belong
+    # in the environment, never in the repository.
+    DEMO_DB_URL: str = ""
+
     # Google OAuth (optional; absent -> OAuth login disabled)
     # Master switch: when False the /auth/login and /auth/callback routes
     # answer 503 instead of crashing, and the frontend hides the Google
