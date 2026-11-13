@@ -24,32 +24,8 @@ os.environ.pop("CELERY_BROKER_URL", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-import sqlglot
-from sqlglot import exp
 
-# The URL schemes that address a real database server. SQLite is the only
-# one the test suite is allowed to write to.
-_REAL_DB_SCHEMES = {
-    "postgresql",
-    "postgres",
-    "mysql",
-    "mariadb",
-    "mssql",
-    "oracle",
-    "cockroachdb",
-}
-
-# Statement types that change data or schema. Anything else is a read.
-_WRITE_EXPRESSIONS = (
-    exp.Insert,
-    exp.Update,
-    exp.Delete,
-    exp.Merge,
-    exp.Create,
-    exp.Drop,
-    exp.Alter,
-    exp.TruncateTable,
-)
+from tests.db_guard import refuse_real_database_writes
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -61,14 +37,11 @@ def _no_real_database_writes():
     a URL it read out of the developer's ``.env``, a write against it is
     refused instead of silently landing in their data.
 
-    The check sits on SQLAlchemy's ``before_cursor_execute`` event, which
-    is the only level that covers every driver. A socket-level guard does
-    *not* work here: psycopg2 talks to libpq, a C library that opens its
-    own sockets and never goes through Python's ``socket`` module. A
-    socket guard was tried and silently let a ``DROP TABLE`` through.
-
-    Reads are allowed - a test may inspect a real database's schema - but
-    nothing may create, alter or delete anything in it.
+    The guard lives in ``tests/db_guard.py`` so it can be unit-tested
+    without a database server. It sits on SQLAlchemy's
+    ``before_cursor_execute`` event, which is the only level that covers
+    every driver - see that module for why a socket-level guard does not
+    work.
 
     On 2026-11-13 a full test run dropped the tables of the local
     development database, because the settings cache made the app bind to
@@ -79,33 +52,11 @@ def _no_real_database_writes():
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
 
-    def _refuse_write(conn, cursor, statement, parameters, context, executemany):
-        url = conn.engine.url
-        if url.get_backend_name() not in _REAL_DB_SCHEMES:
-            return
-
-        # Only writes are forbidden. Reads are allowed so a test can still
-        # inspect a real database's schema. sqlglot already classifies
-        # every statement, so the check does not have to guess from
-        # keywords: a CTE that ends in an INSERT is an INSERT, and a
-        # SELECT is a SELECT.
-        try:
-            parsed = sqlglot.parse_one(statement, read="postgres")
-        except Exception:  # noqa: BLE001 - unparsable SQL is not trusted
-            parsed = None
-
-        if isinstance(parsed, _WRITE_EXPRESSIONS):
-            raise RuntimeError(
-                f"tests must never write to a real database server "
-                f"({url.drivername}://{url.host}/{url.database}): "
-                f"{statement!r}. Use a throwaway SQLite file instead."
-            )
-
-    event.listen(Engine, "before_cursor_execute", _refuse_write)
+    event.listen(Engine, "before_cursor_execute", refuse_real_database_writes)
     try:
         yield
     finally:
-        event.remove(Engine, "before_cursor_execute", _refuse_write)
+        event.remove(Engine, "before_cursor_execute", refuse_real_database_writes)
 
 
 @pytest.fixture(autouse=True)

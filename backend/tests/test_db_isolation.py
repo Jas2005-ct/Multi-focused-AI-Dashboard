@@ -16,6 +16,7 @@ These tests are the tripwire for that.
 """
 
 import pytest
+from sqlalchemy.engine import make_url
 
 
 @pytest.fixture()
@@ -83,6 +84,45 @@ def test_a_test_that_never_uses_the_app_still_cannot_see_the_real_database():
     assert uri.startswith("sqlite://"), f"tests must never see a real database URL (got {uri})"
 
 
+def _postgres_engine():
+    """A PostgreSQL engine whose connections never touch the network.
+
+    The guard runs on ``before_cursor_execute``, which only fires on a
+    real connection, so testing it needs one. Pointing it at a PostgreSQL
+    server would defeat the purpose, and CI has no server - so the
+    connection is replaced with a fake DBAPI connection.
+
+    Everything else is real: the PostgreSQL dialect compiles the SQL, the
+    event fires, and the guard code runs unchanged. Only the socket is
+    gone, so the test proves the refusal without needing a database.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.dialects import registry
+
+    from tests.fake_dbapi import FakePGDialect, fake_creator
+
+    # Register the fake driver under the postgres namespace, so the URL
+    # still reads as postgresql and the guard still classifies it as a
+    # real database.
+    registry.register("postgresql.fake", "tests.fake_dbapi", "FakePGDialect")
+    assert FakePGDialect is not None
+
+    executed: list[str] = []
+
+    engine = create_engine(
+        "postgresql+fake://postgres:0728@localhost:5432/ai_user",
+        creator=fake_creator(executed),
+    )
+    return engine, executed
+
+
+def _writes(statements) -> list[str]:
+    """The subset of ``statements`` that changes data or schema."""
+    from tests.db_guard import is_write_statement
+
+    return [s for s in statements if is_write_statement(s)]
+
+
 def test_writing_to_a_real_database_server_is_refused():
     """The guard must block a write against a live database.
 
@@ -96,13 +136,15 @@ def test_writing_to_a_real_database_server_is_refused():
     own sockets and never touches Python's ``socket`` module - a socket
     guard silently let a ``DROP TABLE`` through.
     """
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
 
-    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+    engine, executed = _postgres_engine()
 
     with pytest.raises(RuntimeError, match="must never write to a real database"):
         with engine.connect() as conn:
             conn.execute(text("DROP TABLE users"))
+
+    assert not _writes(executed), f"a write reached the database: {executed}"
 
 
 def test_reading_a_real_database_is_still_allowed():
@@ -112,14 +154,14 @@ def test_reading_a_real_database_is_still_allowed():
     filter, for instance). Blocking reads would make that verification
     impossible for no safety gain.
     """
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
 
-    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+    engine, executed = _postgres_engine()
 
     with engine.connect() as conn:
-        value = conn.execute(text("SELECT 1")).scalar()
+        conn.execute(text("SELECT 1"))
 
-    assert value == 1
+    assert executed, "the read must still be allowed through"
 
 
 def test_drop_all_against_a_real_database_is_refused():
@@ -130,19 +172,24 @@ def test_drop_all_against_a_real_database_is_refused():
     same ORM tables, against the very same server, and the guard must stop
     it before the first ``DROP TABLE`` reaches the database.
     """
-    from sqlalchemy import create_engine
-
     from auths.models import db
 
-    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+    engine, executed = _postgres_engine()
 
     with pytest.raises(RuntimeError, match="must never write to a real database"):
         db.metadata.drop_all(engine)
 
+    assert not _writes(executed), f"a write reached the database: {executed}"
+
 
 def test_create_all_against_a_real_database_is_refused():
-    """Creating tables in a real database must be refused too."""
-    from sqlalchemy import Column, Integer, create_engine
+    """Creating tables in a real database must be refused too.
+
+    ``checkfirst=False`` so the CREATE is emitted unconditionally: with
+    the check, the fake's "the table already exists" answer would skip
+    the statement and the test would prove nothing.
+    """
+    from sqlalchemy import Column, Integer
     from sqlalchemy.orm import declarative_base
 
     Base = declarative_base()
@@ -151,7 +198,63 @@ def test_create_all_against_a_real_database_is_refused():
         __tablename__ = "widget_probe"
         id = Column(Integer, primary_key=True)
 
-    engine = create_engine("postgresql://postgres:0728@localhost:5432/ai_user")
+    engine, executed = _postgres_engine()
 
     with pytest.raises(RuntimeError, match="must never write to a real database"):
-        Base.metadata.create_all(engine)
+        Base.metadata.create_all(engine, checkfirst=False)
+
+    assert not _writes(executed), f"a write reached the database: {executed}"
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "INSERT INTO users (email) VALUES ('x@example.com')",
+        "UPDATE users SET email = 'x@example.com'",
+        "DELETE FROM users",
+        "DROP TABLE users",
+        "CREATE TABLE t (id INTEGER)",
+        "ALTER TABLE users ADD COLUMN x INTEGER",
+        "TRUNCATE TABLE users",
+        "MERGE INTO users USING users ON true WHEN MATCHED THEN UPDATE SET email = 'x'",
+    ],
+)
+def test_every_write_statement_is_classified_as_a_write(statement):
+    """The classifier must catch every way of changing a database."""
+    from tests.db_guard import is_write_statement
+
+    assert is_write_statement(statement) is True
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM users",
+        "SELECT 1",
+        "WITH recent AS (SELECT * FROM orders) SELECT * FROM recent",
+        "SHOW tables",
+        "EXPLAIN SELECT * FROM users",
+    ],
+)
+def test_read_statements_are_not_classified_as_writes(statement):
+    """A read must never be mistaken for a write."""
+    from tests.db_guard import is_write_statement
+
+    assert is_write_statement(statement) is False
+
+
+def test_unparsable_sql_is_treated_as_a_write():
+    """SQL that cannot be classified cannot be shown to be harmless."""
+    from tests.db_guard import is_write_statement
+
+    assert is_write_statement("this is not sql at all ;;;") is True
+
+
+def test_sqlite_is_not_a_real_database():
+    """The suite's own database must never be blocked."""
+    from tests.db_guard import is_real_database_url
+
+    assert is_real_database_url(make_url("sqlite:///phase0.db")) is False
+    assert is_real_database_url(make_url("sqlite:///:memory:")) is False
+    assert is_real_database_url(make_url("postgresql://u:p@host:5432/db")) is True
+    assert is_real_database_url(make_url("mysql://u:p@host:3306/db")) is True
