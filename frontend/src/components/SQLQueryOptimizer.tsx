@@ -1,0 +1,607 @@
+import { useState } from 'react'
+import { aiQuery, type AiQueryMode } from '../api/dashboardapi'
+import { getErrorMessage, type ApiEnvelope } from '../api/types'
+import type { ActiveConnection } from '../types/connection'
+import type { AiQueryData } from '../types/answer'
+
+function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
+  const [mode, setMode] = useState<AiQueryMode>('auto')
+  const [sentence, setSentence] = useState('')
+  const [optimizedQuery, setOptimizedQuery] = useState('')
+  const [answer, setAnswer] = useState('')
+  const [answerTables, setAnswerTables] = useState<string[]>([])
+  const [answerCount, setAnswerCount] = useState<number | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const resetResults = () => {
+    setOptimizedQuery('')
+    setAnswer('')
+    setAnswerTables([])
+    setAnswerCount(null)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!sentence.trim()) {
+      setError('Please enter a natural language sentence')
+      return
+    }
+
+    if (!activeConnection?.id) {
+      setError('Select a database connection first')
+      return
+    }
+
+    try {
+      setLoading(true)
+      setError('')
+      setSuccess(false)
+
+      const response = await aiQuery({
+        query: sentence.trim(),
+        connection_id: activeConnection.id,
+        mode,
+      })
+      const body = response.data as ApiEnvelope<AiQueryData>
+      const data = body.data
+
+      if (!data) {
+        setError(body.message || 'Failed to optimize query')
+        resetResults()
+        return
+      }
+
+      if (data.type === 'answer') {
+        setAnswer(data.answer || '')
+        setAnswerTables(data.tables || [])
+        setAnswerCount(data.count ?? null)
+        setOptimizedQuery('')
+      } else {
+        setOptimizedQuery(data.sql || '')
+        setAnswer('')
+        setAnswerTables([])
+        setAnswerCount(null)
+      }
+      setSuccess(true)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to optimize query'))
+      resetResults()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(optimizedQuery)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('Failed to copy to clipboard')
+    }
+  }
+
+  const handleClear = () => {
+    setSentence('')
+    resetResults()
+    setError('')
+    setSuccess(false)
+  }
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <div style={styles.headerIcon}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h5 style={styles.cardTitle}>SQL Query Optimizer</h5>
+      </div>
+      <div style={styles.cardBody}>
+        {activeConnection ? (
+          <div style={styles.connectionInfo}>
+            <div style={styles.connectionHeader}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+              </svg>
+              <span style={styles.connectionLabel}>Connected to {activeConnection.database}@{activeConnection.host}</span>
+            </div>
+            <div style={styles.tablesContainer}>
+              <span style={styles.tablesLabel}>Tables:</span>
+              <div style={styles.tablesList}>
+                {activeConnection.tables.map((table) => (
+                  <span key={table} style={styles.tableTag}>{table}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={styles.noConnection}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>No database connected. Select a connection from Saved Connections.</span>
+          </div>
+        )}
+        <form onSubmit={handleSubmit}>
+          <div style={styles.formGroup}>
+            <div style={styles.promptHeader}>
+              <label htmlFor="sentence" style={styles.label}>
+                Describe your query in natural language
+              </label>
+              <div style={styles.modeButtonGroup}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'auto' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('auto')}
+                  disabled={loading}
+                  title="Auto: ReAct agent autonomously decides whether to generate SQL or query live data"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'sql' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('sql')}
+                  disabled={loading}
+                  title="SQL: Direct LCEL chain generates optimized SQL without executing queries"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                  SQL Only
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'answer' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('answer')}
+                  disabled={loading}
+                  title="Answer: Agent queries live tables and returns natural language answer with data rows"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                  Data Answer
+                </button>
+              </div>
+            </div>
+            <textarea
+              id="sentence"
+              style={styles.textarea}
+              rows={3}
+              placeholder={
+                mode === 'sql'
+                  ? 'e.g., Get top 5 highest earning employees ordered by salary...'
+                  : mode === 'answer'
+                  ? 'e.g., What tables are in my db? Or which product has highest purchases...'
+                  : 'e.g., Get all active users created in the last 30 days...'
+              }
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          {error && (
+            <div style={styles.errorAlert}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{error}</span>
+              <button type="button" style={styles.closeBtn} onClick={() => setError('')}>×</button>
+            </div>
+          )}
+
+          {success && (optimizedQuery || answer) && (
+            <div style={styles.successAlert}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+              <span>{answer ? 'Answer ready!' : 'Query optimized successfully!'}</span>
+            </div>
+          )}
+
+          <div style={styles.buttonGroup}>
+            <button
+              type="submit"
+              style={{ ...styles.button, ...styles.primaryButton, ...(loading ? styles.buttonDisabled : {}) }}
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span style={styles.spinner} />
+                  {mode === 'sql' ? 'Generating SQL...' : mode === 'answer' ? 'Fetching Answer...' : 'Optimizing...'}
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                  {mode === 'sql' ? 'Generate SQL' : mode === 'answer' ? 'Get Data Answer' : 'Optimize Query'}
+                </>
+              )}
+            </button>
+            {sentence && (
+              <button
+                type="button"
+                style={{...styles.button, ...styles.secondaryButton}}
+                onClick={handleClear}
+                disabled={loading}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </form>
+
+        {optimizedQuery && (
+          <div style={styles.resultSection}>
+            <div style={styles.codeHeader}>
+              <span style={styles.codeLabel}>SQL</span>
+              <button
+                type="button"
+                style={{...styles.copyButton, ...(copied ? styles.copyButtonSuccess : {})}}
+                onClick={handleCopy}
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <div style={styles.codeBlock}>
+              <code style={styles.code}>{optimizedQuery}</code>
+            </div>
+          </div>
+        )}
+
+        {answer && (
+          <div style={styles.resultSection}>
+            <div style={styles.codeHeader}>
+              <span style={styles.codeLabel}>Answer</span>
+              {answerCount !== null && (
+                <span style={styles.countBadge}>
+                  {answerCount.toLocaleString()} row(s)
+                </span>
+              )}
+            </div>
+            <div style={styles.answerBlock}>
+              <p style={styles.answerText}>{answer}</p>
+              {answerTables.length > 0 && (
+                <div style={styles.tablesList}>
+                  {answerTables.map((t) => (
+                    <span key={t} style={styles.tableTag}>{t}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  card: {
+    background: 'rgba(26, 26, 46, 0.6)',
+    borderRadius: '16px',
+    border: '1px solid rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+    backdropFilter: 'blur(12px)',
+  },
+  cardHeader: {
+    background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))',
+    padding: '20px 24px',
+    borderBottom: '1px solid rgba(255,255,255,0.06)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  headerIcon: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+  },
+  cardTitle: {
+    margin: 0,
+    color: '#ffffff',
+    fontSize: '16px',
+    fontWeight: 600,
+  },
+  cardBody: {
+    padding: '24px',
+  },
+  formGroup: {
+    marginBottom: '20px',
+  },
+  promptHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+    flexWrap: 'wrap' as const,
+    gap: '8px',
+  },
+  modeButtonGroup: {
+    display: 'inline-flex',
+    background: 'rgba(0, 0, 0, 0.35)',
+    borderRadius: '8px',
+    padding: '3px',
+    gap: '3px',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+  },
+  modeButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '4px 10px',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontWeight: 500,
+    background: 'transparent',
+    color: '#8b8ba0',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  modeButtonActive: {
+    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+    color: '#ffffff',
+    boxShadow: '0 2px 6px rgba(102, 126, 234, 0.3)',
+  },
+  label: {
+    display: 'block',
+    color: '#b8b8d0',
+    fontSize: '13px',
+    fontWeight: 500,
+    margin: 0,
+  },
+  textarea: {
+    width: '100%',
+    padding: '14px 16px',
+    background: 'rgba(0,0,0,0.2)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '10px',
+    color: '#ffffff',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    resize: 'vertical',
+    minHeight: '100px',
+    outline: 'none',
+    transition: 'all 0.2s',
+  },
+  errorAlert: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 16px',
+    background: 'rgba(239, 68, 68, 0.1)',
+    border: '1px solid rgba(239, 68, 68, 0.2)',
+    borderRadius: '8px',
+    color: '#ef4444',
+    fontSize: '13px',
+    marginBottom: '16px',
+  },
+  successAlert: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 16px',
+    background: 'rgba(34, 197, 94, 0.1)',
+    border: '1px solid rgba(34, 197, 94, 0.2)',
+    borderRadius: '8px',
+    color: '#22c55e',
+    fontSize: '13px',
+    marginBottom: '16px',
+  },
+  closeBtn: {
+    marginLeft: 'auto',
+    background: 'none',
+    border: 'none',
+    color: 'inherit',
+    fontSize: '18px',
+    cursor: 'pointer',
+    padding: '0 4px',
+  },
+  buttonGroup: {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap' as const,
+  },
+  button: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    padding: '12px 24px',
+    borderRadius: '10px',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    border: 'none',
+  },
+  primaryButton: {
+    flex: 1,
+    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+    color: '#ffffff',
+  },
+  secondaryButton: {
+    background: 'rgba(255,255,255,0.06)',
+    color: '#b8b8d0',
+    border: '1px solid rgba(255,255,255,0.1)',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed',
+  },
+  spinner: {
+    width: '16px',
+    height: '16px',
+    border: '2px solid rgba(255,255,255,0.3)',
+    borderTopColor: '#ffffff',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+  },
+  resultSection: {
+    marginTop: '16px',
+    paddingTop: '16px',
+    borderTop: '1px solid rgba(255,255,255,0.06)',
+  },
+  codeHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '12px',
+  },
+  codeLabel: {
+    color: '#667eea',
+    fontSize: '12px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+  },
+  copyButton: {
+    padding: '4px 12px',
+    background: 'transparent',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: '6px',
+    color: '#8b8ba0',
+    fontSize: '11px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  copyButtonSuccess: {
+    color: '#22c55e',
+    borderColor: 'rgba(34, 197, 94, 0.4)',
+  },
+  codeBlock: {
+    padding: '0 16px',
+    overflow: 'auto',
+  },
+  code: {
+    color: '#a5b4fc',
+    fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
+    fontSize: '14px',
+    lineHeight: '1.7',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  answerBlock: {
+    padding: '16px',
+    background: 'rgba(102, 126, 234, 0.08)',
+    border: '1px solid rgba(102, 126, 234, 0.2)',
+    borderRadius: '10px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '12px',
+  },
+  answerText: {
+    color: '#e0e7ff',
+    fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+    fontSize: '14px',
+    lineHeight: '1.6',
+    margin: 0,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+  },
+  countBadge: {
+    background: 'rgba(102,126,234,0.2)',
+    color: '#a5b4fc',
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '11px',
+    fontWeight: 600,
+  },
+  connectionInfo: {
+    padding: '16px',
+    background: 'rgba(34, 197, 94, 0.08)',
+    border: '1px solid rgba(34, 197, 94, 0.2)',
+    borderRadius: '10px',
+    marginBottom: '20px',
+  },
+  connectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '12px',
+    color: '#22c55e',
+    overflow: 'hidden',
+  },
+  connectionLabel: {
+    fontSize: '13px',
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  tablesContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  tablesLabel: {
+    fontSize: '12px',
+    color: '#8b8ba0',
+    fontWeight: 500,
+  },
+  tablesList: {
+    display: 'flex',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  tableTag: {
+    padding: '4px 10px',
+    background: 'rgba(34, 197, 94, 0.12)',
+    border: '1px solid rgba(34, 197, 94, 0.25)',
+    borderRadius: '6px',
+    color: '#22c55e',
+    fontSize: '11px',
+    fontWeight: 500,
+  },
+  noConnection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '16px',
+    background: 'rgba(239, 68, 68, 0.08)',
+    border: '1px solid rgba(239, 68, 68, 0.2)',
+    borderRadius: '10px',
+    marginBottom: '20px',
+    color: '#ef4444',
+    fontSize: '13px',
+  },
+}
+
+export default SQLQueryOptimizer

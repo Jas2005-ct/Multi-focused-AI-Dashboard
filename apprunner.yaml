@@ -1,0 +1,16 @@
+version: 1.0
+runtime: docker
+build:
+  dockerfile: backend/Dockerfile
+  context: backend
+run:
+  runtime-version: python3.11
+  command: .venv/bin/gunicorn -w 4 -b 0.0.0.0:8000 app:create_app()
+  network:
+    port: 8000
+  health-check:
+    path: /health
+    interval: 10
+    timeout: 5
+    healthy-threshold: 1
+    unhealthy-threshold: 5

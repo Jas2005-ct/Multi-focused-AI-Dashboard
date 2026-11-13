@@ -1,70 +1,58 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
+*.so
 *.egg
-
-# Virtual environments
+*.egg-info/
+dist/
+build/
+.env
+.venv/
 venv/
-env/
-ENV/
-.venv
-
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+ 
+# Node
+node_modules/
+dist/
+npm-debug.log*
+ 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+ 
+# DB / Flask instance
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Vite
+.vite/
+
+# Tooling (local-only)
+.opencode/
+AGENT.md
+.cursor/
+docs/
+
+# Env variants
+.env.*
+!.env.example
+
+# Misc
+*.tmp
+*.bak
+*.log
 
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Logs
-*.log
-logs/
-
-# Database
-*.sqlite3
-*.db
-
-# Node.js (for frontend)
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# Build outputs
-frontend/dist/
-frontend/build/
-frontend/.next/
-frontend/out/
-
-# Coverage
-.coverage
-htmlcov/
-.pytest_cache/
