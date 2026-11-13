@@ -6,7 +6,7 @@ Business logic for DB connection CRUD, validation, and schema introspection.
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import text
 from sqlalchemy.engine import Result
@@ -29,6 +29,9 @@ from connections.pool_manager import connection_pool
 
 _SCHEMA_CACHE: Dict[Tuple[int, int], Tuple[float, FullSchema]] = {}
 _SCHEMA_CACHE_TTL = 300  # 5 minutes
+
+# The display name of the demo connection.
+DEMO_CONNECTION_NAME = "Demo Database (E-commerce)"
 
 
 def _named_rows(result: Result) -> List[Dict[str, Any]]:
@@ -74,8 +77,12 @@ def parse_connection_string(connection_string: str) -> ParsedConnection:
             "host": parsed.hostname or "",
             "port": parsed.port or 5432,
             "database": parsed.path.lstrip("/") if parsed.path else "",
-            "username": parsed.username or "",
-            "password": parsed.password or "",
+            # Credentials are percent-encoded in a URL ("p%40ss" is "p@ss").
+            # Unquoting them keeps the stored username and password equal
+            # to the ones the operator meant, and keeps the lookup of an
+            # existing connection consistent with the stored row.
+            "username": unquote(parsed.username or ""),
+            "password": unquote(parsed.password or ""),
         }
     except Exception as e:
         raise ValueError(f"Invalid connection string format: {e}") from e
@@ -179,6 +186,64 @@ def save_connection(
     db.session.add(new_conn)
     db.session.commit()
     return new_conn
+
+
+class DemoDatabaseNotConfigured(RuntimeError):
+    """Raised when no demo database is configured for this deployment."""
+
+
+def save_demo_connection(user_id: int) -> Tuple[DBConnection, bool]:
+    """Attach the shared demo database to a user.
+
+    The demo database is a separate database that holds synthetic data
+    only, so a visitor can try the assistant without bringing their own.
+    The URL comes from ``DEMO_DB_URL`` - a deployment setting, never a
+    hardcoded credential.
+
+    Returns the connection and whether it was created just now. Calling it
+    twice for the same user reuses the existing row, so the button can be
+    pressed as often as the user likes.
+    """
+    from config import get_settings
+
+    url = (get_settings().DEMO_DB_URL or "").strip()
+    if not url:
+        raise DemoDatabaseNotConfigured("No demo database is configured on this deployment.")
+
+    parsed = parse_connection_string(url)
+    if not parsed["host"] or not parsed["database"]:
+        raise ValueError("The demo database URL is incomplete")
+
+    db_type = "mysql" if url.startswith("mysql") else "postgresql"
+
+    existing = DBConnection.query.filter_by(
+        user_id=user_id,
+        host=parsed["host"],
+        port=parsed["port"],
+        database=parsed["database"],
+        username=parsed["username"],
+        db_type=db_type,
+    ).first()
+    if existing:
+        # Touch it so the connection shows up as recently used.
+        existing.last_used = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.session.commit()
+        return existing, False
+
+    conn = save_connection(
+        user_id=user_id,
+        host=parsed["host"],
+        port=parsed["port"],
+        database=parsed["database"],
+        username=parsed["username"],
+        password=parsed["password"],
+        db_type=db_type,
+        # The configured URL is stored verbatim, so it reaches the driver
+        # exactly as the operator wrote it.
+        connection_string=url,
+        name=DEMO_CONNECTION_NAME,
+    )
+    return conn, True
 
 
 def _to_summary(conn: DBConnection) -> ConnectionSummary:

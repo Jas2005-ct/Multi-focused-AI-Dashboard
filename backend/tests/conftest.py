@@ -20,6 +20,12 @@ os.environ["FLASK_ENV"] = "testing"
 os.environ["OTP_BACKEND"] = "memory"
 os.environ.pop("REDIS_URL", None)
 os.environ.pop("CELERY_BROKER_URL", None)
+# The demo database is a real server too. A test must never point at it:
+# the demo feature is exercised with a fake URL, and the real one stays
+# out of the suite entirely. An explicit empty value is needed (not a
+# pop): the settings object also reads the .env *file*, and an empty
+# environment variable overrides it.
+os.environ["DEMO_DB_URL"] = ""
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -76,6 +82,9 @@ def _hermetic_database_url(tmp_path, monkeypatch):
     from config import get_settings
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'suite.db'}")
+    # Also keep the demo database out of reach: a test that adds the demo
+    # connection must not end up pointing at the developer's real one.
+    monkeypatch.setenv("DEMO_DB_URL", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

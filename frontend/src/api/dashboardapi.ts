@@ -57,6 +57,12 @@ export const testConnection = (dbId: number) =>
 export const deleteConnection = (dbId: number) =>
   API.delete(`/api/v1/connections/${dbId}`)
 
+/**
+ * Attach the shared demo database (synthetic e-commerce data) to the
+ * signed-in user. Idempotent: calling it twice reuses the same connection.
+ */
+export const addDemoConnection = () => API.post('/api/v1/connections/demo')
+
 // Unauthenticated liveness probe for the status badge (Phase 1)
 export const apiStatus = () =>
   publicClient.get('/health')

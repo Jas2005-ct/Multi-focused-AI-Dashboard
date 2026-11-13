@@ -60,6 +60,10 @@ def create_app() -> OpenAPI:
             {
                 "status": "ok" if connected else "error",
                 "database": "connected" if connected else "error",
+                # Whether this deployment offers the shared demo database.
+                # The client uses it to show or hide the "Add demo database"
+                # button - no credentials are involved, only a yes/no.
+                "demo_available": bool((settings.DEMO_DB_URL or "").strip()),
             },
             200 if connected else 503,
         )
