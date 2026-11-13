@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getConnections, deleteConnection, testConnection, getConnection } from '../api/dashboardapi'
+import {
+  getConnections,
+  deleteConnection,
+  testConnection,
+  getConnection,
+  addDemoConnection,
+  apiStatus,
+} from '../api/dashboardapi'
 import { getErrorMessage, type ApiEnvelope } from '../api/types'
 
 interface Connection {
@@ -34,6 +41,8 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(0)
+  const [demoAvailable, setDemoAvailable] = useState<boolean | null>(null)
+  const [addingDemo, setAddingDemo] = useState(false)
 
   const loadConnections = useCallback(async () => {
     try {
@@ -63,6 +72,25 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
     setLoading(true)
     await loadConnections()
   }, [loadConnections])
+
+  // Whether this deployment offers the shared demo database. The flag
+  // comes from the health probe, so the button only appears where the
+  // demo actually works.
+  const checkDemoAvailability = useCallback(async () => {
+    try {
+      const response = await apiStatus()
+      const body = response.data as { demo_available?: boolean }
+      setDemoAvailable(Boolean(body?.demo_available))
+    } catch {
+      // The probe is a nicety: if it fails, do not offer the button.
+      setDemoAvailable(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void checkDemoAvailability()
+  }, [checkDemoAvailability])
 
   // The effect only kicks off the fetch; the loading flag is raised by the
   // action that triggers it, so no state is set synchronously in the effect.
@@ -142,6 +170,33 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
     }
   }
 
+  const handleAddDemo = async () => {
+    try {
+      setAddingDemo(true)
+      const response = await addDemoConnection()
+      const body = response.data as ApiEnvelope<{ id: number; created: boolean }>
+
+      await refreshConnections()
+
+      // Connect straight away: the whole point of the demo is that the
+      // visitor can ask a question without any setup.
+      const demoId = body.data?.id
+      if (typeof demoId === 'number') {
+        await handleConnect(demoId)
+      }
+
+      setMessage(
+        body.data?.created
+          ? 'Demo database added and connected. Ask it something — for example "top products by revenue in Q4".'
+          : 'The demo database was already in your connections.',
+      )
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, 'Could not add the demo database'))
+    } finally {
+      setAddingDemo(false)
+    }
+  }
+
   if (loading) {
     return (
       <div style={styles.card}>
@@ -173,6 +228,19 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
         </div>
         <h5 style={styles.cardTitle}>Saved Database Connections</h5>
         <span style={styles.badge}>{connections.length}</span>
+        {demoAvailable && (
+          <button
+            style={styles.demoBtn}
+            onClick={handleAddDemo}
+            disabled={addingDemo}
+            title="Add the shared sample e-commerce database"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            {addingDemo ? 'Adding...' : 'Demo database'}
+          </button>
+        )}
       </div>
       <div style={styles.cardBody}>
         {message && (
@@ -198,6 +266,14 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
             </div>
             <p style={styles.emptyText}>No saved database connections yet</p>
             <p style={styles.emptySubtext}>Add one using the connection form</p>
+            {demoAvailable && (
+              <button style={styles.demoCta} onClick={handleAddDemo} disabled={addingDemo}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                {addingDemo ? 'Adding...' : 'Or try the demo database'}
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -326,6 +402,35 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#06b6d4',
     fontSize: '13px',
     fontWeight: 600,
+  },
+  demoBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 12px',
+    background: 'rgba(167, 139, 250, 0.15)',
+    border: '1px solid rgba(167, 139, 250, 0.35)',
+    borderRadius: '8px',
+    color: '#a78bfa',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  demoCta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginTop: '20px',
+    padding: '10px 18px',
+    background: 'rgba(167, 139, 250, 0.15)',
+    border: '1px solid rgba(167, 139, 250, 0.35)',
+    borderRadius: '10px',
+    color: '#a78bfa',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
   cardBody: {
     padding: '24px',
