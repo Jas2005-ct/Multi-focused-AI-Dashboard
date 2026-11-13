@@ -2,12 +2,13 @@
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableLambda
 
 from ai.agents.react_agent import run_agent_question
 from ai.guards import is_write_intent as _is_write_intent
+from ai.payloads import RouterResult, Row
 from ai_dashboard.schemas import PromptRequest
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def format_data_answer(table: str, count: int, rows: list[dict[str, Any]]) -> st
     return msg
 
 
-def _metadata_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
+def _metadata_handler(inputs: Dict[str, Any]) -> RouterResult:
     """
     Execute sqlalchemy and return a natural language answer.
 
@@ -69,11 +70,12 @@ def _metadata_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
     db_id: Optional[int] = inputs.get("db_id")
 
     if not db_id:
-        return {
+        no_connection: RouterResult = {
             "type": "answer",
             "answer": "Please select a database connection first, then ask about its tables.",
             "tables": [],
         }
+        return no_connection
 
     if not user_id:
         return {"error": "User not authenticated", "error_type": "auth_error"}
@@ -83,7 +85,8 @@ def _metadata_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
         tables = list_tables.invoke({"user_id": user_id, "db_id": db_id})
         answer = format_introspection_answer(tables)
-        return {"type": "answer", "answer": answer, "tables": tables}
+        listed: RouterResult = {"type": "answer", "answer": answer, "tables": tables}
+        return listed
     except PermissionError as e:
         logger.warning(f"Introspection unauthorized user={user_id} db={db_id}: {e}")
         return {"error": str(e), "error_type": "auth_error"}
@@ -95,7 +98,7 @@ def _metadata_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Failed to list tables: {str(e)}", "error_type": "api_error"}
 
 
-def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
+def _data_handler(inputs: Dict[str, Any]) -> RouterResult:
     """
     Handle per-table row questions: 'how many certificates in certificate table'
     Executes COUNT(*) + sample rows via sqlalchemy.
@@ -106,11 +109,12 @@ def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
     sentence: str = inputs.get("sentence", "") or ""
 
     if not db_id:
-        return {
+        no_connection: RouterResult = {
             "type": "answer",
             "answer": "Please select a database connection first, then ask about that table.",
             "tables": [],
         }
+        return no_connection
     if not user_id:
         return {"error": "User not authenticated", "error_type": "auth_error"}
 
@@ -126,7 +130,7 @@ def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
             re.search(r"\b(what are|list|show|display|give me)\b", sentence, re.IGNORECASE)
         )
         wants_count = bool(re.search(r"\b(how many|count|number)\b", sentence, re.IGNORECASE))
-        rows = []
+        rows: List[Row] = []
         if wants_rows or not wants_count:
             try:
                 rows = sample_rows.invoke(
@@ -136,7 +140,7 @@ def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
                 rows = []
 
         answer = format_data_answer(table, count, rows)
-        result: Dict[str, Any] = {
+        data: RouterResult = {
             "type": "answer",
             "answer": answer,
             "count": count,
@@ -146,10 +150,10 @@ def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
         try:
             from ai.tools.introspection import list_tables
 
-            result["tables"] = list_tables.invoke({"user_id": user_id, "db_id": db_id})
+            data["tables"] = list_tables.invoke({"user_id": user_id, "db_id": db_id})
         except Exception:
             pass
-        return result
+        return data
     except PermissionError as e:
         logger.warning(f"Data unauthorized user={user_id} db={db_id}: {e}")
         return {"error": str(e), "error_type": "auth_error"}
@@ -161,7 +165,7 @@ def _data_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Failed to query table '{table}': {str(e)}", "error_type": "api_error"}
 
 
-def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
+def _query_handler(inputs: Dict[str, Any]) -> RouterResult:
     """Delegate free-form questions to the tool-calling agent."""
     sentence: str = inputs.get("sentence", "")
     user_id: Optional[int] = inputs.get("user_id")
@@ -170,7 +174,7 @@ def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     if _is_write_intent(sentence):
         logger.warning("BLOCKED write intent in _query_handler sentence=%r", sentence)
-        return {
+        blocked: RouterResult = {
             "type": "answer",
             "answer": "Write operation not permitted — this dashboard is read-only. INSERT/UPDATE/DELETE/CREATE/ALTER/DROP operations are blocked. Please use the Projects UI to create or modify data.",
             "toolCalls": [],
@@ -179,13 +183,14 @@ def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
             "count": None,
             "table": None,
         }
+        return blocked
 
     if not db_id or not user_id:
         from ai.agents.sql_chain import get_query_format as sql_get_query_format
         from ai_dashboard.schemas import PromptRequest
 
         req = PromptRequest(sentence=sentence, db_id=db_id)
-        result = sql_get_query_format(req, schema_context=schema_context)
+        result: RouterResult = sql_get_query_format(req, schema_context=schema_context)
         if "output_query" in result:
             result["type"] = "query"
         return result
@@ -193,7 +198,7 @@ def _query_handler(inputs: Dict[str, Any]) -> Dict[str, Any]:
     return run_agent_question(sentence, user_id, db_id, schema_context)
 
 
-def _agent_dispatch(inputs: Dict[str, Any]) -> Dict[str, Any]:
+def _agent_dispatch(inputs: Dict[str, Any]) -> RouterResult:
     """Route every request to the tool-calling agent (LLM decides the tool)."""
     if _is_write_intent(inputs.get("sentence", "")):
         logger.warning(
@@ -234,7 +239,7 @@ def get_routed_query_format(
     user_id: Optional[int] = None,
     db_id: Optional[int] = None,
     schema_context: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> RouterResult:
     return router_chain.invoke(
         {
             "sentence": sentence.sentence,
