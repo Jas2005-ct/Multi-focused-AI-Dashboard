@@ -33,6 +33,18 @@ def app_client(tmp_path):
     db_file = tmp_path.joinpath("phase0.db").as_posix()
     os.environ["DATABASE_URL"] = f"sqlite:///{db_file}"
 
+    # The settings object is cached for the whole process and app.py binds
+    # the app to `settings.DATABASE_URL`. If anything read the settings
+    # before this fixture (any test that touches get_settings() outside the
+    # app_client window will), the cache still holds the DATABASE_URL from
+    # .env - the developer's real database - and the app would be bound to
+    # it. The teardown below then runs db.drop_all() against that database
+    # and deletes its tables. Clearing the cache here makes the app bind to
+    # the throwaway SQLite file no matter what ran before.
+    from config import get_settings
+
+    get_settings.cache_clear()
+
     from app import create_app
     from auths.models import db
 
@@ -45,8 +57,12 @@ def app_client(tmp_path):
         yield app, app.test_client()
     finally:
         db.session.remove()
-        db.drop_all()
+        # Safety net: never drop tables in a database that is not a
+        # throwaway SQLite file, whatever the app ended up bound to.
+        if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite://"):
+            db.drop_all()
         ctx.pop()
+        get_settings.cache_clear()
         if old_database_url is None:
             os.environ.pop("DATABASE_URL", None)
         else:
