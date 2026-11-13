@@ -5,10 +5,11 @@ Business logic for DB connection CRUD, validation, and schema introspection.
 
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 from sqlalchemy import text
+from sqlalchemy.engine import Result
 
 from auths.models import db
 from connections.crypto import crypto
@@ -27,6 +28,22 @@ from connections.pool_manager import connection_pool
 
 _SCHEMA_CACHE: Dict[Tuple[int, int], Tuple[float, FullSchema]] = {}
 _SCHEMA_CACHE_TTL = 300  # 5 minutes
+
+
+def _named_rows(result: Result) -> List[Dict[str, Any]]:
+    """Rows of a query as dicts keyed by lower-cased column label.
+
+    Reading a row by column *name* instead of by position means the SELECT
+    and the reader no longer have to be kept in sync by hand: reordering the
+    columns, or adding one in the middle, can no longer silently put the
+    wrong value in the wrong field.
+
+    The label case is normalised because it is not the same on every
+    supported database - PostgreSQL reports ``information_schema`` labels in
+    lower case and MySQL in upper case - and the driver passes those labels
+    through unchanged.
+    """
+    return [{key.lower(): value for key, value in row.items()} for row in result.mappings()]
 
 
 def get_cached_schema(user_id: int, db_id: int) -> Optional[FullSchema]:
@@ -281,7 +298,8 @@ def get_tables(user_id: int, db_id: int, connection_string: str) -> List[str]:
                 ORDER BY table_name
             """)
         result = conn.execute(query)
-        return [row[0] for row in result]
+        # Single-column SELECT: scalars() returns the table names directly.
+        return list(result.scalars())
 
 
 def get_table_schema(
@@ -304,7 +322,13 @@ def get_table_schema(
         """)
         result = conn.execute(query, {"table_name": table_name})
         columns: List[ColumnSchema] = [
-            {"name": r[0], "type": r[1], "nullable": r[2] == "YES", "default": r[3]} for r in result
+            {
+                "name": row["column_name"],
+                "type": row["data_type"],
+                "nullable": row["is_nullable"] == "YES",
+                "default": row["column_default"],
+            }
+            for row in _named_rows(result)
         ]
     return {"table_name": table_name, "columns": columns}
 
@@ -331,22 +355,16 @@ def get_full_schema(user_id: int, db_id: int, connection_string: str) -> FullSch
         """)
         result = conn.execute(query)
         tables_dict: Dict[str, List[ColumnSchema]] = {}
-        for row in result:
-            t_name, col_name, data_type, is_null, col_default = (
-                row[0],
-                row[1],
-                row[2],
-                row[3],
-                row[4],
-            )
+        for row in _named_rows(result):
+            t_name = row["table_name"]
             if t_name not in tables_dict:
                 tables_dict[t_name] = []
             tables_dict[t_name].append(
                 {
-                    "name": col_name,
-                    "type": data_type,
-                    "nullable": is_null == "YES",
-                    "default": col_default,
+                    "name": row["column_name"],
+                    "type": row["data_type"],
+                    "nullable": row["is_nullable"] == "YES",
+                    "default": row["column_default"],
                 }
             )
 
