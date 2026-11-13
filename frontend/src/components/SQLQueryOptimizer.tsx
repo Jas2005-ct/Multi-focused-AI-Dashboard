@@ -1,18 +1,16 @@
 import { useState } from 'react'
-import { aiQuery } from '../api/dashboardapi'
+import { aiQuery, type AiQueryMode } from '../api/dashboardapi'
 import { getErrorMessage, type ApiEnvelope } from '../api/types'
 import type { ActiveConnection } from '../types/connection'
-import type { AiQueryData, AnswerRow } from '../types/answer'
-import ResultTable from './ResultTable'
+import type { AiQueryData } from '../types/answer'
 
 function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConnection | null }) {
+  const [mode, setMode] = useState<AiQueryMode>('auto')
   const [sentence, setSentence] = useState('')
   const [optimizedQuery, setOptimizedQuery] = useState('')
   const [answer, setAnswer] = useState('')
   const [answerTables, setAnswerTables] = useState<string[]>([])
-  const [answerRows, setAnswerRows] = useState<AnswerRow[]>([])
   const [answerCount, setAnswerCount] = useState<number | null>(null)
-  const [answerTable, setAnswerTable] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -22,9 +20,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
     setOptimizedQuery('')
     setAnswer('')
     setAnswerTables([])
-    setAnswerRows([])
     setAnswerCount(null)
-    setAnswerTable(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,7 +44,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
       const response = await aiQuery({
         query: sentence.trim(),
         connection_id: activeConnection.id,
-        mode: 'auto',
+        mode,
       })
       const body = response.data as ApiEnvelope<AiQueryData>
       const data = body.data
@@ -62,17 +58,13 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
       if (data.type === 'answer') {
         setAnswer(data.answer || '')
         setAnswerTables(data.tables || [])
-        setAnswerRows(data.rows || [])
         setAnswerCount(data.count ?? null)
-        setAnswerTable(data.table ?? null)
         setOptimizedQuery('')
       } else {
         setOptimizedQuery(data.sql || '')
         setAnswer('')
         setAnswerTables([])
-        setAnswerRows([])
         setAnswerCount(null)
-        setAnswerTable(null)
       }
       setSuccess(true)
     } catch (err: unknown) {
@@ -142,14 +134,72 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
         )}
         <form onSubmit={handleSubmit}>
           <div style={styles.formGroup}>
-            <label htmlFor="sentence" style={styles.label}>
-              Describe your query in natural language
-            </label>
+            <div style={styles.promptHeader}>
+              <label htmlFor="sentence" style={styles.label}>
+                Describe your query in natural language
+              </label>
+              <div style={styles.modeButtonGroup}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'auto' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('auto')}
+                  disabled={loading}
+                  title="Auto: ReAct agent autonomously decides whether to generate SQL or query live data"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'sql' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('sql')}
+                  disabled={loading}
+                  title="SQL: Direct LCEL chain generates optimized SQL without executing queries"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                  SQL Only
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.modeButton,
+                    ...(mode === 'answer' ? styles.modeButtonActive : {}),
+                  }}
+                  onClick={() => setMode('answer')}
+                  disabled={loading}
+                  title="Answer: Agent queries live tables and returns natural language answer with data rows"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                  Data Answer
+                </button>
+              </div>
+            </div>
             <textarea
               id="sentence"
               style={styles.textarea}
               rows={3}
-              placeholder="e.g., Get all active users created in the last 30 days..."
+              placeholder={
+                mode === 'sql'
+                  ? 'e.g., Get top 5 highest earning employees ordered by salary...'
+                  : mode === 'answer'
+                  ? 'e.g., What tables are in my db? Or which product has highest purchases...'
+                  : 'e.g., Get all active users created in the last 30 days...'
+              }
               value={sentence}
               onChange={(e) => setSentence(e.target.value)}
               disabled={loading}
@@ -159,9 +209,9 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
           {error && (
             <div style={styles.errorAlert}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               <span>{error}</span>
               <button type="button" style={styles.closeBtn} onClick={() => setError('')}>×</button>
@@ -171,8 +221,8 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
           {success && (optimizedQuery || answer) && (
             <div style={styles.successAlert}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
               </svg>
               <span>{answer ? 'Answer ready!' : 'Query optimized successfully!'}</span>
             </div>
@@ -181,20 +231,20 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
           <div style={styles.buttonGroup}>
             <button
               type="submit"
-              style={{...styles.button, ...styles.primaryButton, ...(loading ? styles.buttonDisabled : {})}}
+              style={{ ...styles.button, ...styles.primaryButton, ...(loading ? styles.buttonDisabled : {}) }}
               disabled={loading}
             >
               {loading ? (
                 <>
                   <span style={styles.spinner} />
-                  Optimizing...
+                  {mode === 'sql' ? 'Generating SQL...' : mode === 'answer' ? 'Fetching Answer...' : 'Optimizing...'}
                 </>
               ) : (
                 <>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                   </svg>
-                  Optimize Query
+                  {mode === 'sql' ? 'Generate SQL' : mode === 'answer' ? 'Get Data Answer' : 'Optimize Query'}
                 </>
               )}
             </button>
@@ -233,9 +283,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
           <div style={styles.resultSection}>
             <div style={styles.codeHeader}>
               <span style={styles.codeLabel}>Answer</span>
-              {/* When rows are present, ResultTable owns the count — showing
-                  it here too would duplicate it. */}
-              {answerCount !== null && answerRows.length === 0 && (
+              {answerCount !== null && (
                 <span style={styles.countBadge}>
                   {answerCount.toLocaleString()} row(s)
                 </span>
@@ -243,14 +291,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
             </div>
             <div style={styles.answerBlock}>
               <p style={styles.answerText}>{answer}</p>
-              {answerRows.length > 0 && (
-                <ResultTable
-                  rows={answerRows}
-                  total={answerCount}
-                  table={answerTable}
-                />
-              )}
-              {answerTables.length > 0 && answerRows.length === 0 && (
+              {answerTables.length > 0 && (
                 <div style={styles.tablesList}>
                   {answerTables.map((t) => (
                     <span key={t} style={styles.tableTag}>{t}</span>
@@ -303,12 +344,47 @@ const styles: Record<string, React.CSSProperties> = {
   formGroup: {
     marginBottom: '20px',
   },
+  promptHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+    flexWrap: 'wrap' as const,
+    gap: '8px',
+  },
+  modeButtonGroup: {
+    display: 'inline-flex',
+    background: 'rgba(0, 0, 0, 0.35)',
+    borderRadius: '8px',
+    padding: '3px',
+    gap: '3px',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+  },
+  modeButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '4px 10px',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontWeight: 500,
+    background: 'transparent',
+    color: '#8b8ba0',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  modeButtonActive: {
+    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+    color: '#ffffff',
+    boxShadow: '0 2px 6px rgba(102, 126, 234, 0.3)',
+  },
   label: {
     display: 'block',
     color: '#b8b8d0',
     fontSize: '13px',
     fontWeight: 500,
-    marginBottom: '8px',
+    margin: 0,
   },
   textarea: {
     width: '100%',
