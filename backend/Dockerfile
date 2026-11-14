@@ -22,4 +22,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # - GUNICORN_WORKERS / GUNICORN_THREADS tune per platform RAM:
 #     Render free tier (512 MB)  -> 2 workers (the default)
 #     App Runner (2 GB)          -> set GUNICORN_WORKERS=4 in the service env
-CMD .venv/bin/gunicorn -w ${GUNICORN_WORKERS:-2} --threads ${GUNICORN_THREADS:-4} -b 0.0.0.0:${PORT:-8000} app:create_app()
+CMD .venv/bin/gunicorn -w ${GUNICORN_WORKERS:-2} --threads ${GUNICORN_THREADS:-4} -b 0.0.0.0:${PORT:-8000} "app:create_app()"
