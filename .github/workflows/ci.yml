@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [developments, main]
+    branches: [developments, master]
   pull_request:
-    branches: [developments, main]
+    branches: [developments, master]
 
 env:
   # Default to memory backend for tests (no Redis required)
