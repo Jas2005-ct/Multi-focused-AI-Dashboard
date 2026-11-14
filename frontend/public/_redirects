@@ -1,0 +1,4 @@
+# SPA fallback for Render static hosting.
+# The app uses BrowserRouter, so every unknown path must serve the shell
+# (index.html) and let react-router handle the route client-side.
+/*    /index.html   200
