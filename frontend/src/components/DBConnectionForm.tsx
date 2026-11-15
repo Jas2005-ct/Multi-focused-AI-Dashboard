@@ -137,6 +137,11 @@ function DBConnectionForm() {
       border: '1px solid rgba(255,255,255,0.08)',
       overflow: 'hidden',
       backdropFilter: 'blur(12px)',
+      display: 'flex',
+      flexDirection: 'column' as const,
+      flex: 1,
+      width: '100%',
+      minHeight: '560px',
     },
     cardHeader: {
       background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
@@ -164,6 +169,9 @@ function DBConnectionForm() {
     },
     cardBody: {
       padding: '24px',
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto' as const,
     },
     grid: {
       display: 'grid',

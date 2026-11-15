@@ -313,6 +313,11 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(255,255,255,0.08)',
     overflow: 'hidden',
     backdropFilter: 'blur(12px)',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    flex: 1,
+    width: '100%',
+    minHeight: '560px',
   },
   cardHeader: {
     background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))',
@@ -340,6 +345,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cardBody: {
     padding: '24px',
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto' as const,
   },
   formGroup: {
     marginBottom: '20px',
