@@ -141,7 +141,7 @@ function DBConnectionForm() {
       flexDirection: 'column' as const,
       flex: 1,
       width: '100%',
-      height: '620px',
+      height: '700px',
     },
     cardHeader: {
       background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
