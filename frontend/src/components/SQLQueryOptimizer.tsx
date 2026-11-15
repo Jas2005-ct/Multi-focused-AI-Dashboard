@@ -273,7 +273,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
                 {copied ? 'Copied!' : 'Copy'}
               </button>
             </div>
-            <div style={styles.codeBlock}>
+            <div style={styles.codeBlock} className="card-scroll">
               <code style={styles.code}>{optimizedQuery}</code>
             </div>
           </div>
@@ -289,7 +289,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
                 </span>
               )}
             </div>
-            <div style={styles.answerBlock}>
+            <div style={styles.answerBlock} className="card-scroll">
               <p style={styles.answerText}>{answer}</p>
               {answerTables.length > 0 && (
                 <div style={styles.tablesList}>
@@ -317,7 +317,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column' as const,
     flex: 1,
     width: '100%',
-    minHeight: '560px',
+    height: '560px',
   },
   cardHeader: {
     background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))',
@@ -518,6 +518,8 @@ const styles: Record<string, React.CSSProperties> = {
   codeBlock: {
     padding: '0 16px',
     overflow: 'auto',
+    maxHeight: '240px',
+    overscrollBehavior: 'contain' as const,
   },
   code: {
     color: '#a5b4fc',
@@ -535,6 +537,9 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column' as const,
     gap: '12px',
+    maxHeight: '280px',
+    overflowY: 'auto' as const,
+    overscrollBehavior: 'contain' as const,
   },
   answerText: {
     color: '#e0e7ff',
