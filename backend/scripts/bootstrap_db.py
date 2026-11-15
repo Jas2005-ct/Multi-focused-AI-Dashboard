@@ -104,7 +104,8 @@ def create_tables() -> list[str]:
     from sqlalchemy import inspect
 
     from app import create_app
-    from extensions import db
+    from auths.models import db  # the shared SQLAlchemy instance (users, refresh_tokens)
+    from connections import model  # noqa: F401  (registers db_connections)
 
     app = create_app()
     with app.app_context():
