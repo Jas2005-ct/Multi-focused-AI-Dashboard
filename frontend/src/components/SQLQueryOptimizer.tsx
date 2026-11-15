@@ -102,7 +102,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
         </div>
         <h5 style={styles.cardTitle}>SQL Query Optimizer</h5>
       </div>
-      <div style={styles.cardBody}>
+      <div style={styles.cardBody} className="card-scroll">
         {activeConnection ? (
           <div style={styles.connectionInfo}>
             <div style={styles.connectionHeader}>
@@ -348,6 +348,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     overflowY: 'auto' as const,
+    overflowX: 'hidden' as const,
   },
   formGroup: {
     marginBottom: '20px',
@@ -407,6 +408,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: '100px',
     outline: 'none',
     transition: 'all 0.2s',
+    boxSizing: 'border-box',
   },
   errorAlert: {
     display: 'flex',

@@ -172,6 +172,7 @@ function DBConnectionForm() {
       flex: 1,
       minHeight: 0,
       overflowY: 'auto' as const,
+      overflowX: 'hidden' as const,
     },
     grid: {
       display: 'grid',
@@ -284,7 +285,7 @@ function DBConnectionForm() {
         </div>
         <h5 style={styles.cardTitle}>Database Connection</h5>
       </div>
-      <div style={styles.cardBody}>
+      <div style={styles.cardBody} className="card-scroll">
         <form onSubmit={handleSubmit}>
           <div style={styles.grid}>
             {inputFields.map((field) => (
