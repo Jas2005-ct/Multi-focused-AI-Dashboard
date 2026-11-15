@@ -11,6 +11,7 @@ function Dashboard() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null)
+  const userName = getUser()?.name?.trim().split(/\s+/)[0] || 'there'
 
   // Google OAuth landing: backend redirects here with ?token&refreshToken&user.
   // Persist once, then strip credentials from the URL.
@@ -69,9 +70,9 @@ function Dashboard() {
       {/* Main Content */}
       <div style={styles.main}>
         <div style={styles.welcome}>
-          <h1 style={styles.welcomeTitle}>Welcome to AI Dashboard</h1>
+          <h1 style={styles.welcomeTitle}>Welcome back, {userName}</h1>
           <p style={styles.welcomeSub}>
-            Optimize your SQL queries using natural language and manage your database connections.
+            AI-powered SQL generation from plain English
           </p>
         </div>
 
@@ -95,9 +96,7 @@ function Dashboard() {
 
       {/* Footer */}
       <footer style={styles.footer}>
-        <p style={{ margin: 0 }}>
-          <ApiStatus /> {' · '} 2026 AI Dashboard. Powered by Flask & React
-        </p>
+        <ApiStatus />
       </footer>
     </div>
   )
@@ -204,6 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
   halfColumn: {
     flex: '1 1 400px',
     minWidth: '0',
+    display: 'flex',
   },
   fullWidth: {
     width: '100%',

@@ -102,7 +102,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
         </div>
         <h5 style={styles.cardTitle}>SQL Query Optimizer</h5>
       </div>
-      <div style={styles.cardBody}>
+      <div style={styles.cardBody} className="card-scroll">
         {activeConnection ? (
           <div style={styles.connectionInfo}>
             <div style={styles.connectionHeader}>
@@ -273,7 +273,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
                 {copied ? 'Copied!' : 'Copy'}
               </button>
             </div>
-            <div style={styles.codeBlock}>
+            <div style={styles.codeBlock} className="card-scroll">
               <code style={styles.code}>{optimizedQuery}</code>
             </div>
           </div>
@@ -289,7 +289,7 @@ function SQLQueryOptimizer({ activeConnection }: { activeConnection: ActiveConne
                 </span>
               )}
             </div>
-            <div style={styles.answerBlock}>
+            <div style={styles.answerBlock} className="card-scroll">
               <p style={styles.answerText}>{answer}</p>
               {answerTables.length > 0 && (
                 <div style={styles.tablesList}>
@@ -313,6 +313,11 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(255,255,255,0.08)',
     overflow: 'hidden',
     backdropFilter: 'blur(12px)',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    flex: 1,
+    width: '100%',
+    height: '700px',
   },
   cardHeader: {
     background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))',
@@ -340,6 +345,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cardBody: {
     padding: '24px',
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto' as const,
+    overflowX: 'hidden' as const,
   },
   formGroup: {
     marginBottom: '20px',
@@ -399,6 +408,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: '100px',
     outline: 'none',
     transition: 'all 0.2s',
+    boxSizing: 'border-box',
   },
   errorAlert: {
     display: 'flex',
@@ -508,6 +518,8 @@ const styles: Record<string, React.CSSProperties> = {
   codeBlock: {
     padding: '0 16px',
     overflow: 'auto',
+    maxHeight: '240px',
+    overscrollBehavior: 'contain' as const,
   },
   code: {
     color: '#a5b4fc',
@@ -525,6 +537,9 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column' as const,
     gap: '12px',
+    maxHeight: '280px',
+    overflowY: 'auto' as const,
+    overscrollBehavior: 'contain' as const,
   },
   answerText: {
     color: '#e0e7ff',
