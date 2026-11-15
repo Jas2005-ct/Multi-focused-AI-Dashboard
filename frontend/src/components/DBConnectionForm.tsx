@@ -137,6 +137,11 @@ function DBConnectionForm() {
       border: '1px solid rgba(255,255,255,0.08)',
       overflow: 'hidden',
       backdropFilter: 'blur(12px)',
+      display: 'flex',
+      flexDirection: 'column' as const,
+      flex: 1,
+      width: '100%',
+      height: '700px',
     },
     cardHeader: {
       background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
@@ -164,6 +169,10 @@ function DBConnectionForm() {
     },
     cardBody: {
       padding: '24px',
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto' as const,
+      overflowX: 'hidden' as const,
     },
     grid: {
       display: 'grid',
@@ -276,7 +285,7 @@ function DBConnectionForm() {
         </div>
         <h5 style={styles.cardTitle}>Database Connection</h5>
       </div>
-      <div style={styles.cardBody}>
+      <div style={styles.cardBody} className="card-scroll">
         <form onSubmit={handleSubmit}>
           <div style={styles.grid}>
             {inputFields.map((field) => (

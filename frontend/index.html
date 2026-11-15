@@ -4,10 +4,54 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>AI Dashboard</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static boot loader: visible before React mounts, replaced on first render. -->
+      <div id="boot-loader">
+        <div class="boot-logo">AI</div>
+        <div class="boot-ring"></div>
+      </div>
+      <style>
+        #boot-loader {
+          min-height: 100svh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 20px;
+          background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+        }
+        .boot-logo {
+          width: 56px;
+          height: 56px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: #fff;
+          font-size: 22px;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          animation: boot-pulse 1.6s ease-in-out infinite;
+        }
+        .boot-ring {
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          border: 3px solid rgba(255, 255, 255, 0.12);
+          border-top-color: #667eea;
+          animation: boot-spin 0.9s linear infinite;
+        }
+        @keyframes boot-spin { to { transform: rotate(360deg); } }
+        @keyframes boot-pulse {
+          0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.45); }
+          50% { transform: scale(1.06); box-shadow: 0 0 0 14px rgba(102, 126, 234, 0); }
+        }
+      </style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
