@@ -317,7 +317,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column' as const,
     flex: 1,
     width: '100%',
-    height: '560px',
+    height: '620px',
   },
   cardHeader: {
     background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))',
