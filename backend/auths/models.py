@@ -1,8 +1,37 @@
 from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 
 db = SQLAlchemy()
+
+# Reserved identity for the shared demo account used while AUTH_REQUIRED is
+# disabled. It has no password and cannot sign in.
+DEMO_USER_EMAIL = "demo@example.com"
+DEMO_USER_NAME = "Demo User"
+
+
+def get_or_create_demo_user() -> "User":
+    """Return the shared demo user, creating it on first use.
+
+    Only used in demo mode (``AUTH_REQUIRED=false``): it gives the anonymous
+    visitor a stable ``users`` row so saved connections and refresh tokens
+    have an owner. The email is a reserved local address, so it can never
+    collide with a real account.
+    """
+    user = User.query.filter_by(email=DEMO_USER_EMAIL).first()
+    if user is not None:
+        return user
+
+    user = User(email=DEMO_USER_EMAIL, name=DEMO_USER_NAME)
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # A concurrent request created the row first (email is unique).
+        db.session.rollback()
+        user = User.query.filter_by(email=DEMO_USER_EMAIL).first()
+    return user
 
 
 class User(db.Model):

@@ -8,6 +8,15 @@ export const API_URL =
 export const googleLoginUrl = `${API_URL}/auth/login`
 
 /**
+ * TEMPORARY DEMO MODE: authentication is disabled so visitors can explore
+ * the demo database without signing in. The dashboard skips the login screen
+ * and the backend treats every request as the shared demo user.
+ * TODO: set this back to true (and the backend AUTH_REQUIRED=true) to
+ * re-enable login/authentication.
+ */
+export const AUTH_REQUIRED = false
+
+/**
  * Google sign-in is disabled by default.
  *
  * Set VITE_ENABLE_GOOGLE_OAUTH=true (and configure the backend with

@@ -1,3 +1,5 @@
+import logging
+
 from flask import jsonify
 from flask_openapi3 import Info, OpenAPI
 from sqlalchemy import text
@@ -11,8 +13,21 @@ from config import get_settings
 from extensions import init_cors, init_limiter, init_migrations, init_oauth
 
 
+logger = logging.getLogger(__name__)
+
+
 def create_app() -> OpenAPI:
     settings = get_settings()
+
+    # TEMPORARY DEMO MODE: surface a loud warning when auth is switched off.
+    # TODO: remove together with the AUTH_REQUIRED=False default in config.py.
+    if not settings.AUTH_REQUIRED:
+        logger.warning(
+            "AUTH_REQUIRED is disabled - the API is treating every request as "
+            "the shared demo user. Re-enable authentication before exposing "
+            "this deployment publicly."
+        )
+
     app = OpenAPI(
         __name__,
         info=Info(
@@ -64,6 +79,9 @@ def create_app() -> OpenAPI:
                 # The client uses it to show or hide the "Add demo database"
                 # button - no credentials are involved, only a yes/no.
                 "demo_available": bool((settings.DEMO_DB_URL or "").strip()),
+                # Whether the client must collect a token before calling the
+                # API. False means demo mode: visitors go straight in.
+                "auth_required": bool(settings.AUTH_REQUIRED),
             },
             200 if connected else 503,
         )

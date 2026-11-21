@@ -1,6 +1,7 @@
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { useEffect } from 'react'
-import { getToken, saveToken, saveUser } from '../api/authapi'
+import { ensureDemoUser, getToken, saveToken, saveUser } from '../api/authapi'
+import { AUTH_REQUIRED } from '../config'
 import type { AuthUser } from '../types/auth'
 import type { ReactNode } from 'react'
 
@@ -39,6 +40,14 @@ function ProtectedRoute({ children }: Props) {
     }
   }, [searchParams, setSearchParams])
   
+  // TEMPORARY DEMO MODE: skip the token check entirely so visitors land on
+  // the dashboard without signing in. TODO: remove this branch (and set
+  // AUTH_REQUIRED=true) to re-enable login.
+  if (!AUTH_REQUIRED) {
+    ensureDemoUser()
+    return children
+  }
+
   const token = getToken()
   if (!token) {
     return <Navigate to="/" />

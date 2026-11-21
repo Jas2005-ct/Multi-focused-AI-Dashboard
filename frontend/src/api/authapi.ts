@@ -62,6 +62,23 @@ export const saveUser = (user: AuthUser) => {
   localStorage.setItem(USER_KEY, JSON.stringify(user))
 }
 
+/**
+ * TEMPORARY DEMO MODE: the shared identity shown in the UI while login is
+ * skipped. The backend owns the real demo row; this is only a display name
+ * so the dashboard has something to render.
+ * TODO: remove together with AUTH_REQUIRED=false.
+ */
+export const DEMO_USER: AuthUser = {
+  id: 0,
+  email: 'demo@example.com',
+  name: 'Demo User',
+}
+
+/** Make sure the dashboard has a user to greet when authentication is off. */
+export const ensureDemoUser = () => {
+  if (!getUser()) saveUser(DEMO_USER)
+}
+
 export const getUser = () => {
   const userStr = localStorage.getItem(USER_KEY)
   if (!userStr) return null

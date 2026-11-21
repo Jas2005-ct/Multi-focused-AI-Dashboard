@@ -1,5 +1,6 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
+import { AUTH_REQUIRED } from './config'
 import ProtectedRoute from './routes/protectedroutes'
 
 const Login = lazy(() => import('./pages/login'))
@@ -61,7 +62,13 @@ function App() {
   return (
     <Suspense fallback={<AppLoader />}>
       <Routes>
-        <Route path="/" element={<Login />} />
+        {/* TEMPORARY DEMO MODE: visitors go straight to the dashboard instead
+            of the login screen. TODO: restore element={<Login />} and set
+            AUTH_REQUIRED=true to re-enable login. */}
+        <Route
+          path="/"
+          element={AUTH_REQUIRED ? <Login /> : <Navigate to="/dashboard" replace />}
+        />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/dashboard" element={
