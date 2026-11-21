@@ -26,6 +26,10 @@ os.environ.pop("CELERY_BROKER_URL", None)
 # pop): the settings object also reads the .env *file*, and an empty
 # environment variable overrides it.
 os.environ["DEMO_DB_URL"] = ""
+# The suite exercises the authenticated paths (401s, token rotation,
+# per-user data). Demo mode (AUTH_REQUIRED=false) is opt-in and tested
+# separately, so force the strict default here.
+os.environ["AUTH_REQUIRED"] = "true"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

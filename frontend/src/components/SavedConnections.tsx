@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getConnections,
   deleteConnection,
@@ -8,6 +8,7 @@ import {
   apiStatus,
 } from '../api/dashboardapi'
 import { getErrorMessage, type ApiEnvelope } from '../api/types'
+import { AUTH_REQUIRED } from '../config'
 
 interface Connection {
   id: number
@@ -43,6 +44,8 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
   const [pages, setPages] = useState(0)
   const [demoAvailable, setDemoAvailable] = useState<boolean | null>(null)
   const [addingDemo, setAddingDemo] = useState(false)
+  // One-shot guard so the demo database is auto-connected only once per mount.
+  const autoDemoStarted = useRef(false)
 
   const loadConnections = useCallback(async () => {
     try {
@@ -196,6 +199,18 @@ function SavedConnections({ onConnectionSelect }: { onConnectionSelect: (connect
       setAddingDemo(false)
     }
   }
+
+  // TEMPORARY DEMO MODE: visitors skip login, so attach and connect the demo
+  // database automatically on first load. TODO: remove together with
+  // AUTH_REQUIRED=false (the manual "Demo database" button stays either way).
+  useEffect(() => {
+    if (AUTH_REQUIRED || autoDemoStarted.current) return
+    autoDemoStarted.current = true
+    void handleAddDemo()
+    // One-shot bootstrap: handleAddDemo is intentionally omitted from the
+    // dependency array so this never re-runs on re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (loading) {
     return (

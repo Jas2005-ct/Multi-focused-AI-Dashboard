@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { logoutUser, getUser, saveAuth, saveToken, saveUser } from '../api/authapi'
+import { AUTH_REQUIRED } from '../config'
 import SQLQueryOptimizer from '../components/SQLQueryOptimizer'
 import DBConnectionForm from '../components/DBConnectionForm'
 import SavedConnections from '../components/SavedConnections'
@@ -60,9 +61,15 @@ function Dashboard() {
             <span style={styles.navUser}>
               {getUser()?.name || ''}
             </span>
-            <button onClick={handleLogout} style={styles.logoutBtn}>
-              Sign Out
-            </button>
+            {/* TEMPORARY DEMO MODE: no session to end while login is skipped.
+                TODO: remove together with AUTH_REQUIRED=false. */}
+            {AUTH_REQUIRED ? (
+              <button onClick={handleLogout} style={styles.logoutBtn}>
+                Sign Out
+              </button>
+            ) : (
+              <span style={styles.demoBadge}>Demo mode</span>
+            )}
           </div>
         </div>
       </nav>
@@ -168,6 +175,15 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     cursor: 'pointer',
     transition: 'all 0.2s',
+  },
+  demoBadge: {
+    background: 'rgba(167,139,250,0.15)',
+    border: '1px solid rgba(167,139,250,0.35)',
+    color: '#a78bfa',
+    borderRadius: '8px',
+    padding: '8px 16px',
+    fontSize: '13px',
+    fontWeight: 600,
   },
   main: {
     flex: 1,
