@@ -1,5 +1,5 @@
 import axios, { type AxiosRequestConfig } from "axios";
-import { API_URL } from "../config";
+import { API_URL, AUTH_REQUIRED } from "../config";
 
 const PUBLIC_PATHS = ["/", "/register", "/forgot-password"];
 
@@ -81,6 +81,12 @@ client.interceptors.response.use(
       } catch {
         // rotation failed — fall through to logout
       }
+    }
+    // TEMPORARY DEMO MODE: there is no login screen to bounce to, so a 401
+    // is surfaced to the caller instead of redirecting.
+    // TODO: remove together with AUTH_REQUIRED=false.
+    if (error?.response?.status === 401 && !AUTH_REQUIRED) {
+      return Promise.reject(error);
     }
     if (error?.response?.status === 401) {
       logoutAndRedirect();

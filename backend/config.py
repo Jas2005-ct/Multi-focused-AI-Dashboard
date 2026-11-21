@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     RATE_LIMIT_PER_MIN: int = 60
 
+    # TEMPORARY DEMO MODE: authentication is disabled so visitors can explore
+    # the demo database without signing in. Every request is attributed to a
+    # shared demo user when this is False.
+    # TODO: set AUTH_REQUIRED=true to re-enable login/authentication.
+    AUTH_REQUIRED: bool = False
+
     # The shared demo database offered to visitors through the "Add demo
     # database" button. It holds synthetic e-commerce data only, and the
     # account it points at is read-only.
